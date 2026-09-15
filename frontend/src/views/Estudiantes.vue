@@ -6,6 +6,7 @@ import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import Alerta from '@/components/Alerta.vue'
 import CsvDropzone from '@/components/CsvDropzone.vue'
+import ProgresoModal from '@/components/ProgresoModal.vue'
 import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
@@ -49,6 +50,12 @@ const previsualizando = ref(false)
 // --- Emisión masiva ---
 const emitiendo = ref(false)
 const resultadoEmision = ref<EmisionMasivaDto | null>(null)
+// Estado del modal de progreso (se emite por lotes para no colgar el servidor).
+const progreso = ref({ visible: false, titulo: '', actual: 0, total: 0, subtitulo: '' })
+// Cuántos tickets se emiten por lote (una petición por lote). Chico a propósito:
+// la barra de progreso avanza un paso por lote, así el contador "X de Y" se ve
+// subir de a poco en vez de saltar de 0 al total en una sola petición.
+const LOTE_EMISION = 25
 
 // --- Filtro por carrera ---
 const carreraSel = ref('')
@@ -210,28 +217,43 @@ async function emitir(est: EstudianteDetalleDto) {
  * solo para esa carrera; si no, para todos los estudiantes registrados.
  */
 async function emitirTodos() {
-  const objetivo = sinTicket.value
-  if (!objetivo.length) return
+  // Solo se emiten los que NO tienen ticket (respetando el filtro de carrera).
+  // Antes, "todos" mandaba sin lista y el backend recorría los ~7000 estudiantes
+  // uno por uno en una sola petición → timeout. Ahora se emite POR LOTES con barra.
+  const ids = sinTicket.value.map((e) => e.idEstudiante)
+  if (!ids.length) return
   const desc = carreraSel.value ? `la carrera "${carreraSel.value}"` : 'todos los registrados'
   const ok = await confirmar({
     titulo: 'Generar tickets',
-    mensaje: `Se generarán ${objetivo.length} ticket(s) para ${desc}. ¿Continuar?`,
+    mensaje: `Se generarán ${ids.length} ticket(s) para ${desc}. ¿Continuar?`,
     textoConfirmar: 'Generar',
   })
   if (!ok) return
 
   emitiendo.value = true
   resultadoEmision.value = null
+  const acumulado: EmisionMasivaDto = { totalEstudiantes: 0, emitidos: 0, omitidos: 0, errores: [] }
+  progreso.value = { visible: true, titulo: 'Emitiendo tickets', actual: 0, total: ids.length, subtitulo: 'Preparando…' }
+
   try {
-    // Sin filtro se manda sin lista: el backend toma a todos los activos.
-    const ids = carreraSel.value ? objetivo.map((e) => e.idEstudiante) : undefined
-    resultadoEmision.value = await emitirTicketsMasivo(ids)
-    alertas.exito(`Emitidos ${resultadoEmision.value.emitidos} ticket(s)`)
+    for (let i = 0; i < ids.length; i += LOTE_EMISION) {
+      const lote = ids.slice(i, i + LOTE_EMISION)
+      const r = await emitirTicketsMasivo(lote)
+      acumulado.totalEstudiantes += r.totalEstudiantes
+      acumulado.emitidos += r.emitidos
+      acumulado.omitidos += r.omitidos
+      acumulado.errores.push(...r.errores)
+      progreso.value.actual = Math.min(i + lote.length, ids.length)
+      progreso.value.subtitulo = `Emitidos ${acumulado.emitidos} · con error ${acumulado.errores.length}`
+    }
+    resultadoEmision.value = acumulado
+    alertas.exito(`Emitidos ${acumulado.emitidos} ticket(s)` + (acumulado.errores.length ? `, ${acumulado.errores.length} con error` : ''))
     await cargar()
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al generar los tickets'))
   } finally {
     emitiendo.value = false
+    progreso.value.visible = false
   }
 }
 
@@ -486,6 +508,15 @@ onMounted(cargar)
         <button type="submit" form="form-estudiante">Guardar</button>
       </template>
     </ModalBase>
+
+    <!-- Modal de progreso de emisión en lote -->
+    <ProgresoModal
+      v-if="progreso.visible"
+      :titulo="progreso.titulo"
+      :actual="progreso.actual"
+      :total="progreso.total"
+      :subtitulo="progreso.subtitulo"
+    />
 
     <!-- Modal ver ticket -->
     <ModalBase v-if="mostrarTicket" titulo="Ticket" ancho="auto" @cerrar="cerrarTicket">

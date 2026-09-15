@@ -13,6 +13,7 @@
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import Alerta from '@/components/Alerta.vue'
+import ProgresoModal from '@/components/ProgresoModal.vue'
 import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
@@ -39,6 +40,8 @@ const resumen = ref<ResumenImpresionDto | null>(null)
 const tickets = ref<TicketDetalleDto[]>([])
 const cargando = ref(false)
 const generando = ref(false)
+// Texto que se muestra en el modal mientras se arma el PDF (con la cantidad).
+const generandoInfo = ref('')
 
 // --- Categoría activa (pestañas) ---
 const categoria = ref<CategoriaTicket>('ESTUDIANTE')
@@ -224,6 +227,7 @@ async function imprimir(todos: boolean) {
   if (!ok) return
 
   generando.value = true
+  generandoInfo.value = `Armando ${n} ticket(s) en ${h} hoja(s). Puede tardar unos segundos.`
   try {
     const blob = await generarPliego({
       formato: formato.value,
@@ -245,6 +249,7 @@ async function imprimir(todos: boolean) {
 /** Vuelve a bajar un pliego SIN marcar nada (por si se perdio el archivo). */
 async function regenerarSinMarcar() {
   generando.value = true
+  generandoInfo.value = `Armando ${resumen.value?.total ?? ''} ticket(s). Puede tardar unos segundos.`
   try {
     const blob = await generarPliego({
       formato: formato.value,
@@ -494,6 +499,16 @@ onMounted(cargar)
         </button>
       </template>
     </TablaDatos>
+
+    <!-- Modal de progreso mientras se arma el PDF (proceso opaco → barra animada) -->
+    <ProgresoModal
+      v-if="generando"
+      titulo="Generando pliego"
+      :actual="0"
+      :total="0"
+      indeterminado
+      :subtitulo="generandoInfo"
+    />
   </div>
 </template>
 

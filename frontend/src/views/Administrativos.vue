@@ -7,6 +7,7 @@ import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import Alerta from '@/components/Alerta.vue'
 import CsvDropzone from '@/components/CsvDropzone.vue'
+import ProgresoModal from '@/components/ProgresoModal.vue'
 import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
@@ -45,6 +46,7 @@ const filtroTicket = ref<'' | 'con' | 'sin'>('')
 
 // Generación en lote
 const emitiendo = ref(false)
+const progreso = ref({ visible: false, titulo: '', actual: 0, total: 0, subtitulo: '' })
 
 // Modal alta
 const mostrarModal = ref(false)
@@ -198,6 +200,7 @@ async function emitirFaltantes() {
   emitiendo.value = true
   let emitidos = 0
   let fallidos = 0
+  progreso.value = { visible: true, titulo: 'Emitiendo tickets', actual: 0, total: objetivo.length, subtitulo: 'Preparando…' }
   try {
     for (const a of objetivo) {
       try {
@@ -206,12 +209,15 @@ async function emitirFaltantes() {
       } catch {
         fallidos++
       }
+      progreso.value.actual = emitidos + fallidos
+      progreso.value.subtitulo = `Emitidos ${emitidos} · con error ${fallidos}`
     }
     if (fallidos) alertas.info(`Emitidos ${emitidos}, con error ${fallidos}`)
     else alertas.exito(`Emitidos ${emitidos} ticket(s)`)
     await cargar()
   } finally {
     emitiendo.value = false
+    progreso.value.visible = false
   }
 }
 
@@ -410,6 +416,15 @@ onMounted(cargar)
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>
       </template>
     </TablaDatos>
+
+    <!-- Modal de progreso de emisión en lote -->
+    <ProgresoModal
+      v-if="progreso.visible"
+      :titulo="progreso.titulo"
+      :actual="progreso.actual"
+      :total="progreso.total"
+      :subtitulo="progreso.subtitulo"
+    />
 
     <!-- Modal alta individual -->
     <ModalBase v-if="mostrarModal" titulo="Nuevo administrativo" @cerrar="mostrarModal = false">
