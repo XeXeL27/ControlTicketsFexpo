@@ -48,6 +48,19 @@ const props = withDefaults(
 const busqueda = ref('')
 const pagina = ref(1)
 
+// Filas por página: arranca con el valor recibido (prop) y el usuario lo cambia
+// con el desplegable del pie. Si el valor inicial no está entre las opciones, se
+// agrega para que quede seleccionado.
+const filasPorPagina = ref(props.porPagina)
+const opcionesPorPagina = computed(() => {
+  const base = [10, 25, 50, 100]
+  if (props.porPagina && !base.includes(props.porPagina)) base.push(props.porPagina)
+  return base.sort((a, b) => a - b)
+})
+watch(filasPorPagina, () => {
+  pagina.value = 1
+})
+
 /**
  * Normaliza para comparar: minusculas y sin tildes.
  * Asi "pena" encuentra "PEÑA" y "ingenieria" encuentra "Ingeniería".
@@ -77,15 +90,15 @@ const filasFiltradas = computed(() => {
 })
 
 const totalPaginas = computed(() => {
-  if (!props.porPagina) return 1
-  return Math.max(1, Math.ceil(filasFiltradas.value.length / props.porPagina))
+  if (!filasPorPagina.value) return 1
+  return Math.max(1, Math.ceil(filasFiltradas.value.length / filasPorPagina.value))
 })
 
 /** Las filas de la pagina actual. */
 const filasPagina = computed(() => {
-  if (!props.porPagina) return filasFiltradas.value
-  const desde = (pagina.value - 1) * props.porPagina
-  return filasFiltradas.value.slice(desde, desde + props.porPagina)
+  if (!filasPorPagina.value) return filasFiltradas.value
+  const desde = (pagina.value - 1) * filasPorPagina.value
+  return filasFiltradas.value.slice(desde, desde + filasPorPagina.value)
 })
 
 // Al filtrar (o al cambiar los datos) la pagina actual puede quedar fuera de rango.
@@ -107,9 +120,9 @@ function irA(n: number) {
 const rango = computed(() => {
   const total = filasFiltradas.value.length
   if (!total) return '0 registros'
-  if (!props.porPagina) return `${total} registros`
-  const desde = (pagina.value - 1) * props.porPagina + 1
-  const hasta = Math.min(desde + props.porPagina - 1, total)
+  if (!filasPorPagina.value) return `${total} registros`
+  const desde = (pagina.value - 1) * filasPorPagina.value + 1
+  const hasta = Math.min(desde + filasPorPagina.value - 1, total)
   return `${desde}-${hasta} de ${total}`
 })
 </script>
@@ -167,9 +180,15 @@ const rango = computed(() => {
       </table>
     </div>
 
-    <!-- Pie: cuantos se ven y navegacion entre paginas -->
-    <div v-if="porPagina && filasFiltradas.length" class="tabla-pie">
-      <span class="tabla-rango">{{ rango }}</span>
+    <!-- Pie: cuantos se ven, filas por pagina y navegacion entre paginas -->
+    <div v-if="filasPorPagina && filasFiltradas.length" class="tabla-pie">
+      <div class="fila">
+        <span class="tabla-rango">{{ rango }}</span>
+        <label class="tabla-rango" style="margin:0">Filas por página</label>
+        <select v-model.number="filasPorPagina" style="width:auto">
+          <option v-for="o in opcionesPorPagina" :key="o" :value="o">{{ o }}</option>
+        </select>
+      </div>
       <div v-if="totalPaginas > 1" class="fila">
         <button class="secundario" :disabled="pagina === 1" @click="irA(pagina - 1)">
           Anterior

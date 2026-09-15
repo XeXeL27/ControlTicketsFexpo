@@ -2,6 +2,7 @@ package com.uap.control_tickets.services.interfaces;
 
 import com.uap.control_tickets.dto.ticket.EmisionMasivaDto;
 import com.uap.control_tickets.dto.ticket.ResumenImpresionDto;
+import com.uap.control_tickets.enums.CategoriaTicket;
 import com.uap.control_tickets.enums.FormatoPliego;
 import com.uap.control_tickets.dto.ticket.TicketDetalleDto;
 
@@ -20,6 +21,9 @@ public interface TicketService {
      */
     TicketDetalleDto emitirEstudiante(Long idEstudiante);
 
+    /** Emite el ticket de un administrativo (código ADM-… + qrToken). Idempotente. */
+    TicketDetalleDto emitirAdministrativo(Long idAdministrativo);
+
     /**
      * Emite el ticket de varios estudiantes de una sola vez.
      * Si la lista es null o vacía se toman TODOS los estudiantes activos.
@@ -28,26 +32,28 @@ public interface TicketService {
      */
     EmisionMasivaDto emitirEstudiantesMasivo(List<Long> idsEstudiante);
 
-    // --- Impresion por tandas ---
+    // --- Impresion por tandas (cada categoria se imprime por separado) ---
 
-    /** Cuantos tickets ya se imprimieron, cuantos faltan y cuantas hojas se necesitan. */
-    ResumenImpresionDto resumenImpresion(FormatoPliego formato);
+    /** Estado de impresion (impresos/pendientes/hojas) ACOTADO a una categoria. */
+    ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria);
 
     /**
-     * Arma el PDF del proximo pliego, acomodando los tickets en hojas oficio.
+     * Arma el PDF del proximo pliego de UNA categoria, acomodando los tickets en hojas oficio.
      *
-     * @param formato  disposicion y medidas del ticket en la hoja.
-     * @param cantidad cuantos tickets incluir; null o <=0 = todos los pendientes.
+     * @param formato   disposicion y medidas del ticket en la hoja.
+     * @param categoria que tickets imprimir (solo se mezclan tickets de la misma categoria).
+     * @param cantidad  cuantos tickets incluir; null o <=0 = todos los pendientes.
      * @param soloPendientes true = toma solo los que nunca se imprimieron.
-     * @param marcar   true = los deja marcados como impresos (para no repetirlos).
+     * @param marcar    true = los deja marcados como impresos (para no repetirlos).
      */
-    byte[] generarPliego(FormatoPliego formato, Integer cantidad, boolean soloPendientes, boolean marcar);
+    byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, Integer cantidad,
+                         boolean soloPendientes, boolean marcar);
 
     /** Marca o desmarca un ticket como impreso (por si hubo que reimprimir uno). */
     void marcarImpreso(Long idTicket, boolean impreso);
 
-    /** Vuelve a dejar TODOS los tickets como no impresos (reinicia la tanda). */
-    int reiniciarImpresion();
+    /** Vuelve a dejar como no impresos todos los tickets de una categoria (reinicia esa tanda). */
+    int reiniciarImpresion(CategoriaTicket categoria);
 
     /** Ticket renderizado (con datos + QR) como PNG. */
     byte[] renderPng(Long idTicket);

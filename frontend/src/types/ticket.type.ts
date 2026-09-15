@@ -35,8 +35,14 @@ export interface EmisionMasivaDto {
 // --- Impresion por tandas ---
 export type FormatoPliego = 'MIXTO_8' | 'HORIZONTAL_5'
 
-/** Refleja ResumenImpresionDto. */
+/** Categorías de ticket (EXTERNO = particular). Coincide con CategoriaTicket del backend. */
+export type CategoriaTicket = 'ESTUDIANTE' | 'ADMINISTRATIVO' | 'EXTERNO'
+
+/** Refleja ResumenImpresionDto (acotado a una categoría). */
 export interface ResumenImpresionDto {
+  categoria: CategoriaTicket
+  /** true = ya hay plantilla de arte para esta categoría y se puede generar el pliego. */
+  plantillaDisponible: boolean
   total: number
   impresos: number
   pendientes: number

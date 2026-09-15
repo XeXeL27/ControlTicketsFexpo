@@ -20,6 +20,16 @@ public class ResumenImpresionDto {
     /** Todavia sin imprimir. */
     private long pendientes;
 
+    /** Categoria de esta tirada (ESTUDIANTE, ADMINISTRATIVO, EXTERNO). */
+    private String categoria;
+
+    /**
+     * true = ya existe la plantilla de arte para esta categoria y se puede generar el
+     * pliego. Por ahora solo ESTUDIANTE la tiene; las demas cuentan tickets pero aun
+     * no se pueden imprimir.
+     */
+    private boolean plantillaDisponible;
+
     /** Formato elegido, para que el frontend muestre las medidas. */
     private String formato;
 

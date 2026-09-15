@@ -1,12 +1,18 @@
 <script setup lang="ts">
-// Pantalla de impresion agrupada.
+// Pantalla de impresion agrupada, POR CATEGORÍA.
 //
-// La imprenta trabaja con hojas OFICIO (21.5 x 33 cm) con varios tickets por hoja.
-// Como la tirada es grande se imprime por TANDAS, y el sistema recuerda cuales ya
-// salieron en un pliego para no repetir a nadie ni saltear a nadie.
+// Cada categoría (estudiantes, administrativos, particulares) tiene su propio arte,
+// así que se imprime en tiradas separadas: las pestañas de arriba cambian todo el
+// panel (resumen + tabla + generar) a esa categoría.
+//
+// Por ahora solo ESTUDIANTE tiene plantilla de arte cargada; las demás muestran sus
+// conteos pero con el botón de generar deshabilitado hasta que llegue su diseño.
 import { computed, ref, onMounted } from 'vue'
-import axios from 'axios'
 import TablaDatos from '@/components/TablaDatos.vue'
+import Alerta from '@/components/Alerta.vue'
+import { mensajeError } from '@/utils/errores'
+import { useAlertas } from '@/composables/useAlertas'
+import { useConfirmacion } from '@/composables/useConfirmacion'
 import { listarTickets } from '@/api/ticket.service'
 import {
   generarPliego,
@@ -14,15 +20,32 @@ import {
   reiniciarImpresion,
   resumenImpresion,
 } from '@/api/ticket.service'
-import type { FormatoPliego, ResumenImpresionDto, TicketDetalleDto } from '@/types/ticket.type'
+import type {
+  CategoriaTicket,
+  FormatoPliego,
+  ResumenImpresionDto,
+  TicketDetalleDto,
+} from '@/types/ticket.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
+
+const alertas = useAlertas()
+const { confirmar } = useConfirmacion()
 
 const resumen = ref<ResumenImpresionDto | null>(null)
 const tickets = ref<TicketDetalleDto[]>([])
 const cargando = ref(false)
 const generando = ref(false)
-const error = ref('')
-const aviso = ref('')
+
+// --- Categoría activa (pestañas) ---
+const categoria = ref<CategoriaTicket>('ESTUDIANTE')
+const CATEGORIAS: { valor: CategoriaTicket; nombre: string }[] = [
+  { valor: 'ESTUDIANTE', nombre: 'Estudiantes' },
+  { valor: 'ADMINISTRATIVO', nombre: 'Administrativos' },
+  { valor: 'EXTERNO', nombre: 'Particulares' },
+]
+const categoriaNombre = computed(
+  () => CATEGORIAS.find((c) => c.valor === categoria.value)?.nombre ?? '',
+)
 
 const formato = ref<FormatoPliego>('MIXTO_8')
 /** Cuantas hojas imprimir en esta tanda. 0 = todas las pendientes. */
@@ -45,13 +68,25 @@ const FORMATOS: { valor: FormatoPliego; nombre: string; detalle: string }[] = [
 
 const formatoActual = computed(() => FORMATOS.find((f) => f.valor === formato.value)!)
 
-const columnas: ColumnaTabla[] = [
-  { clave: 'codigoIdentificacion', titulo: 'Código', ancho: '130px' },
-  { clave: 'nombreCompleto', titulo: 'Nombre completo' },
-  { clave: 'ru', titulo: 'R.U.', ancho: '100px' },
-  { clave: 'carrera', titulo: 'Carrera' },
-  { clave: 'impreso', titulo: 'Impresión', ancho: '150px', buscable: false },
-]
+/** Columnas según la categoría: cada una imprime datos distintos. */
+const columnas = computed<ColumnaTabla[]>(() => {
+  const base: ColumnaTabla[] = [
+    { clave: 'codigoIdentificacion', titulo: 'Código', ancho: '130px' },
+    { clave: 'nombreCompleto', titulo: 'Nombre completo' },
+  ]
+  if (categoria.value === 'ESTUDIANTE') {
+    base.push({ clave: 'ru', titulo: 'R.U.', ancho: '100px' }, { clave: 'carrera', titulo: 'Carrera' })
+  } else if (categoria.value === 'ADMINISTRATIVO') {
+    base.push({ clave: 'codigoAdministrativo', titulo: 'Código adm.', ancho: '140px' })
+  } else {
+    base.push({ clave: 'ci', titulo: 'CI', ancho: '120px' })
+  }
+  base.push({ clave: 'impreso', titulo: 'Impresión', ancho: '150px', buscable: false })
+  return base
+})
+
+/** Tickets de la categoría activa. */
+const ticketsCategoria = computed(() => tickets.value.filter((t) => t.categoria === categoria.value))
 
 /** Cuantos tickets entran en la tanda pedida. 0 hojas = todos los pendientes. */
 const cantidadTanda = computed(() => {
@@ -61,9 +96,9 @@ const cantidadTanda = computed(() => {
 })
 
 const ticketsFiltrados = computed(() => {
-  if (verEstado.value === 'pendientes') return tickets.value.filter((t) => !t.impreso)
-  if (verEstado.value === 'impresos') return tickets.value.filter((t) => t.impreso)
-  return tickets.value
+  if (verEstado.value === 'pendientes') return ticketsCategoria.value.filter((t) => !t.impreso)
+  if (verEstado.value === 'impresos') return ticketsCategoria.value.filter((t) => t.impreso)
+  return ticketsCategoria.value
 })
 
 /** Porcentaje impreso, para la barra de avance. */
@@ -72,56 +107,63 @@ const avance = computed(() => {
   return Math.round((resumen.value.impresos / resumen.value.total) * 100)
 })
 
-function msg(e: unknown, def: string): string {
-  if (axios.isAxiosError(e)) return e.response?.data?.mensaje || def
-  return def
-}
+/** ¿La categoría activa ya tiene plantilla de arte para imprimir? */
+const puedeImprimir = computed(() => resumen.value?.plantillaDisponible ?? false)
 
 async function cargar() {
   cargando.value = true
-  error.value = ''
   try {
-    const [r, t] = await Promise.all([resumenImpresion(formato.value), listarTickets()])
+    const [r, t] = await Promise.all([resumenImpresion(formato.value, categoria.value), listarTickets()])
     resumen.value = r
     tickets.value = t
   } catch (e) {
-    error.value = msg(e, 'Error al cargar el estado de impresión')
+    alertas.error(mensajeError(e, 'Error al cargar el estado de impresión'))
   } finally {
     cargando.value = false
   }
 }
 
-/** Cambiar de formato solo cambia las medidas: hay que recalcular hojas y por hoja. */
-async function cambiarFormato() {
+/** Solo hace falta recalcular el resumen (medidas/conteos de la categoría). */
+async function recalcularResumen() {
   try {
-    resumen.value = await resumenImpresion(formato.value)
+    resumen.value = await resumenImpresion(formato.value, categoria.value)
   } catch (e) {
-    error.value = msg(e, 'Error al recalcular el formato')
+    alertas.error(mensajeError(e, 'Error al recalcular'))
   }
 }
 
+/** Cambiar de pestaña: nueva categoría, se recalcula su resumen y se resetea el filtro. */
+function cambiarCategoria(c: CategoriaTicket) {
+  if (c === categoria.value) return
+  categoria.value = c
+  hojas.value = 0
+  verEstado.value = 'todos'
+  recalcularResumen()
+}
+
 async function generar() {
-  if (!resumen.value || !resumen.value.pendientes) return
+  if (!resumen.value || !resumen.value.pendientes || !puedeImprimir.value) return
   const n = cantidadTanda.value
   const h = Math.ceil(n / resumen.value.porHoja)
-  if (!confirm(
-    `Se generará un PDF con ${n} ticket(s) en ${h} hoja(s) y quedarán marcados como impresos.\n\n` +
-    `¿Continuar?`,
-  )) return
+  const ok = await confirmar({
+    titulo: 'Generar pliego',
+    mensaje: `Se generará un PDF con ${n} ticket(s) de ${categoriaNombre.value} en ${h} hoja(s) y quedarán marcados como impresos. ¿Continuar?`,
+    textoConfirmar: 'Generar',
+  })
+  if (!ok) return
 
   generando.value = true
-  error.value = ''
-  aviso.value = ''
   try {
     const blob = await generarPliego({
       formato: formato.value,
+      categoria: categoria.value,
       cantidad: hojas.value > 0 ? n : undefined,
     })
-    descargar(blob, `pliego-${formato.value.toLowerCase()}-${n}-tickets.pdf`)
-    aviso.value = `Pliego generado: ${n} ticket(s) en ${h} hoja(s). Ya quedaron marcados como impresos.`
+    descargar(blob, `pliego-${categoria.value.toLowerCase()}-${formato.value.toLowerCase()}-${n}.pdf`)
+    alertas.exito(`Pliego generado: ${n} ticket(s) en ${h} hoja(s). Ya quedaron marcados como impresos.`)
     await cargar()
   } catch (e) {
-    error.value = msg(e, 'Error al generar el pliego')
+    alertas.error(mensajeError(e, 'Error al generar el pliego'))
   } finally {
     generando.value = false
   }
@@ -130,17 +172,17 @@ async function generar() {
 /** Vuelve a bajar un pliego SIN marcar nada (por si se perdio el archivo). */
 async function regenerarSinMarcar() {
   generando.value = true
-  error.value = ''
   try {
     const blob = await generarPliego({
       formato: formato.value,
+      categoria: categoria.value,
       soloPendientes: false,
       marcar: false,
     })
-    descargar(blob, `pliego-completo-${formato.value.toLowerCase()}.pdf`)
-    aviso.value = 'Pliego con TODOS los tickets. No se cambió ninguna marca de impresión.'
+    descargar(blob, `pliego-${categoria.value.toLowerCase()}-completo.pdf`)
+    alertas.info(`Pliego con TODOS los tickets de ${categoriaNombre.value}. No se cambió ninguna marca.`)
   } catch (e) {
-    error.value = msg(e, 'Error al regenerar el pliego')
+    alertas.error(mensajeError(e, 'Error al regenerar el pliego'))
   } finally {
     generando.value = false
   }
@@ -151,21 +193,24 @@ async function alternarImpreso(t: TicketDetalleDto) {
     await marcarImpreso(t.idTicket, !t.impreso)
     await cargar()
   } catch (e) {
-    error.value = msg(e, 'Error al cambiar la marca de impresión')
+    alertas.error(mensajeError(e, 'Error al cambiar la marca de impresión'))
   }
 }
 
 async function reiniciar() {
-  if (!confirm(
-    'Esto deja TODOS los tickets como no impresos y la tirada vuelve a empezar de cero.\n\n' +
-    '¿Continuar?',
-  )) return
+  const ok = await confirmar({
+    titulo: 'Reiniciar tirada',
+    mensaje: `Esto deja como NO impresos TODOS los tickets de ${categoriaNombre.value} y esa tirada vuelve a empezar de cero. ¿Continuar?`,
+    textoConfirmar: 'Reiniciar',
+    peligro: true,
+  })
+  if (!ok) return
   try {
-    const n = await reiniciarImpresion()
-    aviso.value = `Se desmarcaron ${n} ticket(s). La tirada vuelve a empezar.`
+    const n = await reiniciarImpresion(categoria.value)
+    alertas.exito(`Se desmarcaron ${n} ticket(s). La tirada vuelve a empezar.`)
     await cargar()
   } catch (e) {
-    error.value = msg(e, 'Error al reiniciar')
+    alertas.error(mensajeError(e, 'Error al reiniciar'))
   }
 }
 
@@ -190,9 +235,29 @@ onMounted(cargar)
   <div>
     <h2 style="margin:0 0 16px">Impresión agrupada</h2>
 
+    <!-- Pestañas de categoría -->
+    <div class="tabs">
+      <button
+        v-for="c in CATEGORIAS"
+        :key="c.valor"
+        class="tab"
+        :class="{ activa: c.valor === categoria }"
+        @click="cambiarCategoria(c.valor)"
+      >
+        {{ c.nombre }}
+      </button>
+    </div>
+
+    <!-- Aviso cuando la categoría todavía no tiene arte -->
+    <Alerta v-if="resumen && !puedeImprimir" tipo="info">
+      La plantilla de arte de <strong>{{ categoriaNombre }}</strong> todavía no está cargada,
+      así que aún no se puede generar su pliego. Los tickets se pueden emitir y contar; en
+      cuanto llegue el diseño, esta pantalla los imprime igual que a los estudiantes.
+    </Alerta>
+
     <!-- Estado de la tirada -->
     <div class="card" style="margin-bottom:16px">
-      <strong>Avance de la tirada</strong>
+      <strong>Avance de la tirada — {{ categoriaNombre }}</strong>
       <div v-if="resumen" style="margin-top:12px">
         <div class="tarjetas">
           <div class="dato">
@@ -232,7 +297,7 @@ onMounted(cargar)
       </p>
 
       <label>Formato del pliego</label>
-      <select v-model="formato" @change="cambiarFormato" style="max-width:420px">
+      <select v-model="formato" @change="recalcularResumen" style="max-width:420px">
         <option v-for="f in FORMATOS" :key="f.valor" :value="f.valor">{{ f.nombre }}</option>
       </select>
       <p style="color:var(--texto-suave);font-size:12px;margin:6px 0 14px">
@@ -247,6 +312,7 @@ onMounted(cargar)
           min="0"
           :max="resumen?.hojasPendientes || 0"
           style="max-width:120px"
+          :disabled="!puedeImprimir"
         />
         <span style="color:var(--texto-suave);font-size:13px">
           0 = todas las pendientes.
@@ -258,10 +324,10 @@ onMounted(cargar)
       </div>
 
       <div class="acciones" style="margin-top:16px;flex-wrap:wrap">
-        <button :disabled="generando || !resumen?.pendientes" @click="generar">
+        <button :disabled="generando || !resumen?.pendientes || !puedeImprimir" @click="generar">
           {{ generando ? 'Generando...' : 'Generar pliego y marcar como impresos' }}
         </button>
-        <button class="secundario" :disabled="generando || !resumen?.total" @click="regenerarSinMarcar">
+        <button class="secundario" :disabled="generando || !resumen?.total || !puedeImprimir" @click="regenerarSinMarcar">
           Descargar todos (sin marcar)
         </button>
         <button class="secundario" :disabled="!resumen?.impresos" @click="reiniciar">
@@ -269,11 +335,9 @@ onMounted(cargar)
         </button>
       </div>
 
-      <p v-if="aviso" class="ok">{{ aviso }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="resumen && !resumen.pendientes && resumen.total" class="ok">
-        No quedan tickets pendientes: toda la tirada ya se imprimió.
-      </p>
+      <Alerta v-if="resumen && puedeImprimir && !resumen.pendientes && resumen.total" tipo="exito">
+        No quedan tickets pendientes en {{ categoriaNombre }}: toda la tirada ya se imprimió.
+      </Alerta>
     </div>
 
     <!-- Detalle por ticket -->
@@ -283,12 +347,12 @@ onMounted(cargar)
       clave="idTicket"
       :cargando="cargando"
       :por-pagina="15"
-      placeholder-busqueda="Buscar por código, nombre, R.U. o carrera..."
-      texto-vacio="No hay tickets emitidos todavía."
+      placeholder-busqueda="Buscar por código, nombre..."
+      :texto-vacio="`No hay tickets de ${categoriaNombre} todavía.`"
     >
       <template #herramientas>
         <select v-model="verEstado" style="max-width:220px">
-          <option value="todos">Todos ({{ tickets.length }})</option>
+          <option value="todos">Todos ({{ ticketsCategoria.length }})</option>
           <option value="pendientes">Sin imprimir ({{ resumen?.pendientes ?? 0 }})</option>
           <option value="impresos">Ya impresos ({{ resumen?.impresos ?? 0 }})</option>
         </select>
@@ -314,6 +378,29 @@ onMounted(cargar)
 </template>
 
 <style scoped>
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--borde);
+  flex-wrap: wrap;
+}
+.tab {
+  background: none;
+  color: var(--texto-suave);
+  border-radius: 8px 8px 0 0;
+  padding: 10px 18px;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { background: #f1f5f9; color: var(--texto); }
+.tab.activa {
+  background: none;
+  color: var(--azul);
+  border-bottom-color: var(--azul);
+}
+
 .tarjetas {
   display: flex;
   gap: 14px;

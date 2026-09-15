@@ -4,8 +4,12 @@
 //   cargar() -> listar · abrir modal (nuevo/editar) · guardar() -> crear/actualizar
 //   eliminar() -> baja logica en el backend.
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
 import TablaDatos from '@/components/TablaDatos.vue'
+import ModalBase from '@/components/ModalBase.vue'
+import Alerta from '@/components/Alerta.vue'
+import { mensajeError } from '@/utils/errores'
+import { useAlertas } from '@/composables/useAlertas'
+import { useConfirmacion } from '@/composables/useConfirmacion'
 import type { ColumnaTabla } from '@/types/tabla.type'
 import {
   actualizarPersona,
@@ -15,6 +19,9 @@ import {
 } from '@/api/persona.service'
 import type { PersonaDetalleDto, PersonaDto } from '@/types/persona.type'
 
+const alertas = useAlertas()
+const { confirmar } = useConfirmacion()
+
 const personas = ref<PersonaDetalleDto[]>([])
 const cargando = ref(false)
 const columnas: ColumnaTabla[] = [
@@ -22,8 +29,6 @@ const columnas: ColumnaTabla[] = [
   { clave: 'ci', titulo: 'CI', ancho: '140px' },
   { clave: 'genero', titulo: 'Genero', ancho: '140px' },
 ]
-
-const error = ref('')
 
 // Estado del formulario modal
 const mostrarModal = ref(false)
@@ -35,25 +40,12 @@ function formVacio(): PersonaDto {
   return { nombre: '', paterno: '', materno: '', ci: '', genero: '' }
 }
 
-// Traduce el error de axios a un mensaje legible.
-function mensajeError(e: unknown, porDefecto: string): string {
-  if (axios.isAxiosError(e)) {
-    return (
-      e.response?.data?.mensaje ||
-      Object.values(e.response?.data?.campos || {}).join(', ') ||
-      porDefecto
-    )
-  }
-  return porDefecto
-}
-
 async function cargar() {
   cargando.value = true
-  error.value = ''
   try {
     personas.value = await listarPersonas()
   } catch (e) {
-    error.value = mensajeError(e, 'Error al cargar personas')
+    alertas.error(mensajeError(e, 'Error al cargar personas'))
   } finally {
     cargando.value = false
   }
@@ -88,6 +80,7 @@ async function guardar() {
       await crearPersona(form.value)
     }
     mostrarModal.value = false
+    alertas.exito(editando.value ? 'Persona actualizada' : 'Persona creada')
     await cargar()
   } catch (e) {
     errorForm.value = mensajeError(e, 'Error al guardar')
@@ -95,12 +88,19 @@ async function guardar() {
 }
 
 async function eliminar(p: PersonaDetalleDto) {
-  if (!confirm(`¿Eliminar a ${p.nombreCompleto}?`)) return
+  const ok = await confirmar({
+    titulo: 'Eliminar persona',
+    mensaje: `¿Eliminar a ${p.nombreCompleto}?`,
+    textoConfirmar: 'Eliminar',
+    peligro: true,
+  })
+  if (!ok) return
   try {
     await eliminarPersona(p.idPersona)
+    alertas.exito('Persona eliminada')
     await cargar()
   } catch (e) {
-    error.value = mensajeError(e, 'Error al eliminar')
+    alertas.error(mensajeError(e, 'Error al eliminar'))
   }
 }
 
@@ -114,14 +114,12 @@ onMounted(cargar)
       <button @click="nuevo">+ Nueva persona</button>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-
     <TablaDatos
       :columnas="columnas"
       :filas="personas"
       clave="idPersona"
       :cargando="cargando"
-      placeholder-busqueda="Buscar por nombre, CI o genero..."
+      placeholder-busqueda="Buscar..."
       texto-vacio="Sin personas registradas."
     >
       <template #acciones="{ fila }">
@@ -131,34 +129,33 @@ onMounted(cargar)
     </TablaDatos>
 
     <!-- Modal de alta/edicion -->
-    <div v-if="mostrarModal" class="modal-fondo" @click.self="mostrarModal = false">
-      <div class="modal">
-        <h3>{{ editando ? 'Editar persona' : 'Nueva persona' }}</h3>
-        <form @submit.prevent="guardar">
-          <label>Nombre *</label>
-          <input v-model="form.nombre" required />
-          <label>Paterno *</label>
-          <input v-model="form.paterno" required />
-          <label>Materno</label>
-          <input v-model="form.materno" />
-          <label>CI *</label>
-          <input v-model="form.ci" required />
-          <label>Genero</label>
-          <select v-model="form.genero">
-            <option value="">(sin especificar)</option>
-            <option value="MASCULINO">Masculino</option>
-            <option value="FEMENINO">Femenino</option>
-            <option value="OTRO">Otro</option>
-          </select>
-
-          <p v-if="errorForm" class="error">{{ errorForm }}</p>
-
-          <div class="acciones" style="margin-top:18px;justify-content:flex-end">
-            <button type="button" class="secundario" @click="mostrarModal = false">Cancelar</button>
-            <button type="submit">Guardar</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ModalBase
+      v-if="mostrarModal"
+      :titulo="editando ? 'Editar persona' : 'Nueva persona'"
+      @cerrar="mostrarModal = false"
+    >
+      <form id="form-persona" @submit.prevent="guardar">
+        <label>Nombre *</label>
+        <input v-model="form.nombre" required />
+        <label>Paterno *</label>
+        <input v-model="form.paterno" required />
+        <label>Materno</label>
+        <input v-model="form.materno" />
+        <label>CI *</label>
+        <input v-model="form.ci" required />
+        <label>Genero</label>
+        <select v-model="form.genero">
+          <option value="">(sin especificar)</option>
+          <option value="MASCULINO">Masculino</option>
+          <option value="FEMENINO">Femenino</option>
+          <option value="OTRO">Otro</option>
+        </select>
+        <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
+      </form>
+      <template #pie>
+        <button type="button" class="secundario" @click="mostrarModal = false">Cancelar</button>
+        <button type="submit" form="form-persona">Guardar</button>
+      </template>
+    </ModalBase>
   </div>
 </template>

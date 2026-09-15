@@ -15,6 +15,8 @@ public interface AdministrativoDao extends JpaRepository<Administrativo, Long> {
 
     Optional<Administrativo> findByCodigoAdministrativo(String codigoAdministrativo);
 
+    Optional<Administrativo> findByPersonaIdPersonaAndEstado(Long idPersona, EstadoRegistro estado);
+
     boolean existsByCodigoAdministrativo(String codigoAdministrativo);
 
     boolean existsByCodigoAdministrativoAndIdAdministrativoNot(String codigo, Long idAdministrativo);

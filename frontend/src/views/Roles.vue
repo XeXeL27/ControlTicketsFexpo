@@ -1,31 +1,36 @@
 <script setup lang="ts">
 // CRUD de Roles. Mismo patron que Personas pero mas simple (solo nombre).
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
 import TablaDatos from '@/components/TablaDatos.vue'
+import ModalBase from '@/components/ModalBase.vue'
+import Alerta from '@/components/Alerta.vue'
+import { mensajeError } from '@/utils/errores'
+import { useAlertas } from '@/composables/useAlertas'
+import { useConfirmacion } from '@/composables/useConfirmacion'
 import type { ColumnaTabla } from '@/types/tabla.type'
 import { actualizarRol, crearRol, eliminarRol, listarRoles } from '@/api/rol.service'
 import type { RolDetalleDto } from '@/types/rol.type'
 
+const alertas = useAlertas()
+const { confirmar } = useConfirmacion()
+
 const roles = ref<RolDetalleDto[]>([])
+const cargando = ref(false)
 const columnas: ColumnaTabla[] = [{ clave: 'nombre', titulo: 'Nombre' }]
 
-const error = ref('')
 const mostrarModal = ref(false)
 const editando = ref<number | null>(null)
 const nombre = ref('')
 const errorForm = ref('')
 
-function msg(e: unknown, def: string): string {
-  return (axios.isAxiosError(e) && e.response?.data?.mensaje) || def
-}
-
 async function cargar() {
-  error.value = ''
+  cargando.value = true
   try {
     roles.value = await listarRoles()
   } catch (e) {
-    error.value = msg(e, 'Error al cargar roles')
+    alertas.error(mensajeError(e, 'Error al cargar roles'))
+  } finally {
+    cargando.value = false
   }
 }
 
@@ -51,19 +56,27 @@ async function guardar() {
       await crearRol({ nombre: nombre.value })
     }
     mostrarModal.value = false
+    alertas.exito(editando.value ? 'Rol actualizado' : 'Rol creado')
     await cargar()
   } catch (e) {
-    errorForm.value = msg(e, 'Error al guardar')
+    errorForm.value = mensajeError(e, 'Error al guardar')
   }
 }
 
 async function eliminar(r: RolDetalleDto) {
-  if (!confirm(`¿Eliminar el rol ${r.nombre}?`)) return
+  const ok = await confirmar({
+    titulo: 'Eliminar rol',
+    mensaje: `¿Eliminar el rol ${r.nombre}?`,
+    textoConfirmar: 'Eliminar',
+    peligro: true,
+  })
+  if (!ok) return
   try {
     await eliminarRol(r.idRol)
+    alertas.exito('Rol eliminado')
     await cargar()
   } catch (e) {
-    error.value = msg(e, 'Error al eliminar')
+    alertas.error(mensajeError(e, 'Error al eliminar'))
   }
 }
 
@@ -77,12 +90,11 @@ onMounted(cargar)
       <button @click="nuevo">+ Nuevo rol</button>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-
     <TablaDatos
       :columnas="columnas"
       :filas="roles"
       clave="idRol"
+      :cargando="cargando"
       placeholder-busqueda="Buscar rol..."
       texto-vacio="Sin roles registrados."
     >
@@ -92,19 +104,20 @@ onMounted(cargar)
       </template>
     </TablaDatos>
 
-    <div v-if="mostrarModal" class="modal-fondo" @click.self="mostrarModal = false">
-      <div class="modal">
-        <h3>{{ editando ? 'Editar rol' : 'Nuevo rol' }}</h3>
-        <form @submit.prevent="guardar">
-          <label>Nombre del rol *</label>
-          <input v-model="nombre" required placeholder="Ej. CONTROL" />
-          <p v-if="errorForm" class="error">{{ errorForm }}</p>
-          <div class="acciones" style="margin-top:18px;justify-content:flex-end">
-            <button type="button" class="secundario" @click="mostrarModal = false">Cancelar</button>
-            <button type="submit">Guardar</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ModalBase
+      v-if="mostrarModal"
+      :titulo="editando ? 'Editar rol' : 'Nuevo rol'"
+      @cerrar="mostrarModal = false"
+    >
+      <form id="form-rol" @submit.prevent="guardar">
+        <label>Nombre del rol *</label>
+        <input v-model="nombre" required placeholder="Ej. CONTROL" />
+        <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
+      </form>
+      <template #pie>
+        <button type="button" class="secundario" @click="mostrarModal = false">Cancelar</button>
+        <button type="submit" form="form-rol">Guardar</button>
+      </template>
+    </ModalBase>
   </div>
 </template>

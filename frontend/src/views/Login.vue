@@ -67,9 +67,9 @@ async function ingresar() {
   color: #fff; display: flex; flex-direction: column;
   align-items: center; justify-content: center; text-align: center; padding: 40px;
 }
-.marca .logo { width: 120px; height: auto; margin-bottom: 24px; filter: drop-shadow(0 4px 12px rgba(0,0,0,.3)); }
+.marca .logo { width: 350px; height: auto; margin-bottom: -24px; filter: drop-shadow(0 4px 12px rgba(0,0,0,.3)); }
 .marca h1 { margin: 0; font-size: 30px; }
-.marca p { opacity: .85; margin-top: 8px; }
+.marca p { opacity: .85; margin-top: 5px; }
 .panel { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .login { width: 360px; }
 .login h2 { margin: 0 0 4px; color: var(--azul); }

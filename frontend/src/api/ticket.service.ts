@@ -1,6 +1,7 @@
 // Capa de API de Tickets (emisión + descarga de imagen/PDF).
 import http from '@/api/http'
 import type {
+  CategoriaTicket,
   EmisionMasivaDto,
   FormatoPliego,
   ResumenImpresionDto,
@@ -16,6 +17,17 @@ export function emitirTicketEstudiante(idEstudiante: number) {
   return http
     .post<TicketDetalleDto>('/tickets/emitir-estudiante', null, { params: { idEstudiante } })
     .then((r) => r.data)
+}
+
+export function emitirTicketAdministrativo(idAdministrativo: number) {
+  return http
+    .post<TicketDetalleDto>('/tickets/emitir-administrativo', null, { params: { idAdministrativo } })
+    .then((r) => r.data)
+}
+
+// Solo el QR del ticket (para categorías sin plantilla aún, ej. administrativo).
+export function obtenerTicketQr(idTicket: number) {
+  return http.get(`/tickets/${idTicket}/qr`, { responseType: 'blob' }).then((r) => r.data as Blob)
 }
 
 // Los endpoints de imagen/PDF exigen el token JWT en el header, por eso NO se
@@ -40,18 +52,22 @@ export function emitirTicketsMasivo(idsEstudiante?: number[]) {
 
 // --- Impresion por tandas ---
 
-export function resumenImpresion(formato: FormatoPliego = 'MIXTO_8') {
+export function resumenImpresion(
+  formato: FormatoPliego = 'MIXTO_8',
+  categoria: CategoriaTicket = 'ESTUDIANTE',
+) {
   return http
-    .get<ResumenImpresionDto>('/tickets/impresion/resumen', { params: { formato } })
+    .get<ResumenImpresionDto>('/tickets/impresion/resumen', { params: { formato, categoria } })
     .then((r) => r.data)
 }
 
 /**
- * Genera el PDF del pliego. Por defecto toma solo los pendientes y los deja
- * marcados como impresos, para que la proxima tanda siga donde quedo esta.
+ * Genera el PDF del pliego de UNA categoría. Por defecto toma solo los pendientes y
+ * los deja marcados como impresos, para que la próxima tanda siga donde quedó esta.
  */
 export function generarPliego(opciones: {
   formato: FormatoPliego
+  categoria: CategoriaTicket
   cantidad?: number
   soloPendientes?: boolean
   marcar?: boolean
@@ -60,6 +76,7 @@ export function generarPliego(opciones: {
     .post('/tickets/impresion/pliego', null, {
       params: {
         formato: opciones.formato,
+        categoria: opciones.categoria,
         cantidad: opciones.cantidad,
         soloPendientes: opciones.soloPendientes ?? true,
         marcar: opciones.marcar ?? true,
@@ -73,7 +90,9 @@ export function marcarImpreso(idTicket: number, impreso: boolean) {
   return http.patch('/tickets/impresion/marcar', null, { params: { idTicket, impreso } })
 }
 
-/** Deja todos los tickets como NO impresos (reinicia la tanda). */
-export function reiniciarImpresion() {
-  return http.post<number>('/tickets/impresion/reiniciar').then((r) => r.data)
+/** Deja como NO impresos todos los tickets de una categoría (reinicia esa tanda). */
+export function reiniciarImpresion(categoria: CategoriaTicket = 'ESTUDIANTE') {
+  return http
+    .post<number>('/tickets/impresion/reiniciar', null, { params: { categoria } })
+    .then((r) => r.data)
 }
