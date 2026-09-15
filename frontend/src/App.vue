@@ -4,6 +4,8 @@
 // Si hay sesion, muestra la barra superior + menu lateral + la vista actual.
 import { useRouter } from 'vue-router'
 import { auth } from '@/store/auth'
+import AlertasHost from '@/components/AlertasHost.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const router = useRouter()
 
@@ -14,6 +16,10 @@ function cerrarSesion(): void {
 </script>
 
 <template>
+  <!-- Hosts globales: toasts y dialogo de confirmacion (siempre montados) -->
+  <AlertasHost />
+  <ConfirmDialog />
+
   <!-- Sin sesion: solo el contenido (el login ocupa toda la pantalla) -->
   <router-view v-if="!auth.autenticado" />
 
@@ -34,6 +40,7 @@ function cerrarSesion(): void {
       <nav class="menu">
         <router-link to="/">Inicio</router-link>
         <router-link to="/estudiantes">Estudiantes</router-link>
+        <router-link to="/administrativos">Administrativos</router-link>
         <router-link to="/impresion">Impresión</router-link>
         <router-link to="/personas">Personas</router-link>
         <router-link to="/usuarios">Usuarios</router-link>

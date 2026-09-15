@@ -120,17 +120,46 @@ Hecho:
   ver (PNG en modal) y descargar (PDF). Services `estudiante.service.ts` +
   `ticket.service.ts`; tipos `estudiante.type.ts` + `ticket.type.ts`. Los endpoints
   imagen/PDF se piden con axios `responseType:'blob'` + `URL.createObjectURL`
-  (no `<img src>` directo, por el token JWT). `npm run build` OK. Falta probar en vivo.
+  (no `<img src>` directo, por el token JWT). `npm run build` OK.
+
+- **Administrativos end-to-end (backend + pantalla) listo, a la par de estudiantes**:
+  CRUD + emisión de ticket (ADM-000001…, idempotente) + importación CSV con la MISMA
+  lógica que estudiante (autodetección de codificación, **previsualizar** y
+  **reimport que actualiza**). Reconoce por `codigoAdministrativo`; detección de
+  encabezado por el CI numérico (el código puede no serlo). Pantalla con dropzone,
+  vista previa, filtro con/sin ticket y "generar faltantes". Falta el arte del ticket.
+
+- **Toda la parte delicada del CSV extraída a `Utils/csv/CsvUtils`** (codificación
+  UTF-8 estricto → windows-1252/CP850 por puntaje, separador, BOM, normalización,
+  aviso de texto mal codificado). La comparten estudiante y administrativo; ya no
+  está duplicada.
+
+- **Impresión por CATEGORÍA** (cada categoría tiene arte distinto, no se mezclan en
+  una hoja): `resumenImpresion`, `generarPliego` y `reiniciarImpresion` acotados a
+  una `CategoriaTicket`. `ResumenImpresionDto` trae `plantillaDisponible` (hoy solo
+  ESTUDIANTE). Generar el pliego de una categoría sin arte da 400 con mensaje claro,
+  en vez de reventar. La pantalla `Impresion.vue` tiene **pestañas Estudiantes /
+  Administrativos / Particulares**, columnas según la categoría y cartel "plantilla
+  pendiente" para las que aún no tienen arte. Verificado: pliego estudiante 200/PDF,
+  pliego administrativo 400 amable.
+
+- **Componentes/base UI reutilizables del frontend** (ver sección 3): `ModalBase`,
+  `Alerta` (banner inline) + `AlertasHost` (toasts) con `useAlertas`,
+  `ConfirmDialog` con `useConfirmacion`, `CsvDropzone` y `utils/errores`. Ya no queda
+  ningún `alert()`/`confirm()`/`prompt()` nativo ni markup de modal a mano; todas las
+  vistas los usan.
 
 Pendiente:
-- Probar la pantalla de estudiantes en el navegador (aún solo validada por build).
-- Mismo flujo (CSV + emisión + pantalla) para **administrativo** y para
-  **externo/particular** (venta manual).
-- Plantillas PNG de administrativo y externo (por ahora solo existe la de estudiante).
+- **Arte (plantillas PNG) de administrativo y particular** + generalizar
+  `TicketRenderer` (hoy `pdfPliegoEstudiantes`/`DatosTicketEstudiante` tienen
+  incrustada la de estudiante) y poner `plantillaDisponible()` en `true` para ellas.
+- **Flujo de particular/externo** (venta manual): NO existe emisión (`emitirParticular`)
+  ni pantalla todavía. La pestaña Particulares en Impresión ya está, pero sin tickets.
 - Endpoint de **escaneo**: registrar ENTRADA/SALIDA por `qrToken` y alternar el
   flag `Ticket.dentro`. Es lo único que usa el rol CONTROL (ya creado en la BD)
   y la entidad `Acceso` (ya creada, todavía sin escrituras).
-- **Monitoreo en tiempo real**: decisión pendiente entre SSE (push) o polling.
+- **Monitoreo en tiempo real**: lo tomarán otros colaboradores. Decisión pendiente
+  entre SSE (push) o polling.
 
 ---
 
@@ -152,17 +181,40 @@ Copiado de `esccuela-tecnica` (misma base, mismo sistema de seguridad).
 - Convenciones tomadas de escuela-tecnica: `src/types/*.type.ts` (interfaces que
   reflejan los DTOs), `src/api/*.service.ts` (una función por endpoint, tipada),
   `src/store/auth.ts`. Alias `@` → `src`. Logo UAP en `public/logo.png`.
-- **`views/Impresion.vue`** (ruta `/impresion`) — impresión agrupada: avance de la
-  tirada, generación del pliego por tandas y marca impreso/pendiente por ticket.
+- **`views/Impresion.vue`** (ruta `/impresion`) — impresión agrupada **por categoría**
+  (pestañas Estudiantes/Administrativos/Particulares): avance de la tirada, generación
+  del pliego por tandas y marca impreso/pendiente por ticket. Columnas según la
+  categoría; cartel "plantilla pendiente" cuando no hay arte.
+
+**Componentes y composables reutilizables** (usarlos en vez de reinventar; están
+todos comentados en español):
 - **`components/TablaDatos.vue`** — tabla reutilizable (buscador + paginación +
-  estados de carga/vacío). La usan Estudiantes, Personas, Usuarios y Roles; **toda
-  lista nueva debería usarla en vez de escribir un `<table>` a mano**. Es un
-  componente genérico (`generic="T"`), así que los slots reciben la fila tipada.
+  estados de carga/vacío). La usan Estudiantes, Administrativos, Personas, Usuarios,
+  Roles e Impresión; **toda lista nueva debería usarla en vez de escribir un
+  `<table>` a mano**. Es genérica (`generic="T"`): los slots reciben la fila tipada.
   Se le pasan `columnas` (`ColumnaTabla[]`) y `filas`; se personaliza una celda con
   el slot `#col-<clave>` y los botones con `#acciones`, y se agregan filtros propios
   con `#herramientas`. El buscador recorre **todas** las columnas y compara sin
-  tildes, así que "pena" encuentra "PEÑA". Trae su propia `.card`: no hay que
-  envolverla en otra.
+  tildes ("pena" encuentra "PEÑA"). Trae su propia `.card`: no envolverla en otra.
+- **`components/ModalBase.vue`** — cáscara de modal (fondo, cerrar por click-afuera y
+  **ESC**, slots `titulo`/cuerpo/`pie`). Reemplaza todo el markup `.modal-fondo` a mano.
+  Truco de formularios: el `<form id="x">` va en el cuerpo y el botón submit en `#pie`
+  con `form="x"` (el pie está fuera del form).
+- **Alertas propias** (no usar `alert()`): **toasts** con `useAlertas()` +
+  `<AlertasHost>` (montado una vez en `App.vue`) para resultados de acciones
+  (`alertas.exito/error/info(...)`), y **banner inline** `<Alerta tipo="error|exito|info">`
+  para validaciones/resultados dentro de la página.
+- **Confirmación propia** (no usar `confirm()`): `useConfirmacion()` →
+  `if (await confirmar({ titulo, mensaje, peligro }))`, con `<ConfirmDialog>` montado
+  una vez en `App.vue`.
+- **`components/CsvDropzone.vue`** — selector de archivo con arrastrar-y-soltar +
+  validación `.csv` + ficha del archivo. `v-model` con el `File`; emite `elegido`/
+  `quitado`. Lo usan Estudiantes y Administrativos; el botón "Importar" va en su slot
+  `#acciones`.
+- **`utils/errores.ts` → `mensajeError(e, def)`** — saca el mensaje legible de un error
+  de axios (`data.mensaje` o los `campos` de validación). Único, ya no duplicado.
+- Los **hosts globales** (`AlertasHost`, `ConfirmDialog`) están en `App.vue`, siempre
+  montados. Los composables son singletons a nivel de módulo (importar y usar).
 
 ---
 
@@ -190,6 +242,8 @@ Utils/         Utilidades sin estado (ojo: U mayúscula, es el nombre real del p
   qr/          QrGenerator (ZXing).
   ticket/      TicketRenderer (rellena la plantilla PNG y exporta PNG/PDF) +
                DatosTicketEstudiante (los campos que se imprimen).
+  csv/         CsvUtils (codificación/separador/BOM/normalización del CSV, compartido
+               por las importaciones de estudiante y administrativo).
 ```
 
 **El prefijo `/api` NO se escribe en los controllers**: `WebConfig` se lo agrega a
@@ -294,9 +348,15 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
   NO se sube** (tiene la clave de BD y el secreto JWT).
 - Perfil activo en local: `jarv`. En servidor se usará otro perfil.
 
-> Nota: el directorio de trabajo **aún no es un repositorio git** (existe
-> `.gitignore` pero no hay `.git`). Para cualquier trabajo con commits hay que
-> hacer `git init` primero.
+> ⚠️ **Ojo con el nombre del archivo local.** Spring carga el perfil `jarv` desde
+> `application-jarv.properties` (con doble `p`) y `.gitignore` solo ignora ese
+> nombre correcto (`application-*.properties`). Un archivo **mal escrito**
+> `aplication-jarv.properties` (falta una `p`) ni lo lee Spring **ni lo ignora
+> git**, así que aparece como untracked y sus credenciales quedan en riesgo de
+> commit. Si existe, renombralo a `application-jarv.properties`.
+
+> Nota: ya es un repositorio git (rama `main`, primer commit hecho). El `.git`
+> existe; no hace falta `git init`.
 
 Claves importantes del perfil `jarv`:
 - BD: `jdbc:postgresql://localhost:5432/bd_control_tickets_v1`; usuario y clave
@@ -331,26 +391,40 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
 **Estudiantes** (ADMINISTRADOR) — `/api/estudiantes`
 - `GET /listar` · `GET /obtener?idEstudiante=` · `POST /crear` · `DELETE /eliminar?idEstudiante=`
 - `POST /importar` — multipart, campo **`archivo`**. CSV por POSICIÓN:
-  `ru, nombre completo, ci, carrera`. Devuelve `{totalFilas, creados, errores:[{fila,motivo}]}`.
+  `ru, nombre completo, ci, carrera`. Devuelve `{totalFilas, creados, actualizados, errores:[{fila,motivo}]}`.
+- `POST /previsualizar` — multipart, campo `archivo`; ver bloque de previsualización abajo.
+
+**Administrativos** (ADMINISTRADOR) — `/api/administrativos` — mismo patrón que estudiantes
+- `GET /listar` · `GET /obtener?idAdministrativo=` · `POST /crear` · `DELETE /eliminar?idAdministrativo=`
+- `POST /importar` — multipart, campo **`archivo`**. CSV por POSICIÓN:
+  `codigo administrativo, nombre completo, ci`. Reimport **actualiza** (reconoce por
+  código). Devuelve `{totalFilas, creados, actualizados, errores}`.
+- `POST /previsualizar` — igual que estudiantes pero con columnas de administrativo.
 
 **Tickets** (ADMINISTRADOR + CONTROL, salvo emitir) — `/api/tickets`
 - `GET /listar` · `GET /obtener?idTicket=`
 - `POST /emitir-estudiante?idEstudiante=` — **solo ADMINISTRADOR**; idempotente.
+- `POST /emitir-administrativo?idAdministrativo=` — **solo ADMINISTRADOR**; idempotente.
 - `POST /emitir-estudiantes-masivo` — **solo ADMINISTRADOR**. Cuerpo opcional: una
   lista de ids; sin cuerpo emite para **todos** los estudiantes activos. Devuelve
   `{totalEstudiantes, emitidos, omitidos, errores}`. Ojo: el método del service
   **no** lleva `@Transactional` y llama a `emitirEstudiante` por el proxy (`self`),
   para que cada emisión tenga su transacción y un fallo no tumbe el lote entero.
-- `GET /impresion/resumen?formato=` → `{total, impresos, pendientes, porHoja, hojasPendientes, largoCm, altoCm}`
-- `POST /impresion/pliego?formato=&cantidad=&soloPendientes=&marcar=` → **PDF del pliego**.
-  Por defecto toma solo los pendientes y los marca impresos al terminar.
-- `PATCH /impresion/marcar?idTicket=&impreso=` · `POST /impresion/reiniciar`
+- **Impresión POR CATEGORÍA** (`categoria=ESTUDIANTE|ADMINISTRATIVO|EXTERNO`, default
+  ESTUDIANTE): cada categoría se imprime aparte porque tienen arte distinto.
+  - `GET /impresion/resumen?formato=&categoria=` → `{categoria, plantillaDisponible,
+    total, impresos, pendientes, porHoja, hojasPendientes, largoCm, altoCm}`
+  - `POST /impresion/pliego?formato=&categoria=&cantidad=&soloPendientes=&marcar=` →
+    **PDF del pliego** de esa categoría. Si la categoría no tiene arte
+    (`plantillaDisponible=false`, hoy todo salvo ESTUDIANTE) → **400** con mensaje claro.
+  - `PATCH /impresion/marcar?idTicket=&impreso=` · `POST /impresion/reiniciar?categoria=`
 
-**Previsualización de CSV** — `POST /api/estudiantes/previsualizar` (multipart,
-campo `archivo`). Corre el **mismo** parser que la importación real pero sin tocar
-la BD, y devuelve la codificación detectada, el separador, si hubo encabezado,
-cuántas filas son altas y cuántas actualizaciones, más las primeras 15 filas ya
-parseadas. Es lo que alimenta la vista previa de la pantalla de estudiantes.
+**Previsualización de CSV** — `POST /api/estudiantes/previsualizar` y
+`POST /api/administrativos/previsualizar` (multipart, campo `archivo`). Corre el
+**mismo** parser que la importación real pero sin tocar la BD, y devuelve la
+codificación detectada, el separador, si hubo encabezado, cuántas filas son altas y
+cuántas actualizaciones, más las primeras 15 filas ya parseadas. Alimenta la vista
+previa de las pantallas de estudiantes y administrativos.
 - `GET /{idTicket}/png` · `GET /{idTicket}/pdf` — rinden el ticket con datos de BD.
 
 **QR y demo** (ADMINISTRADOR + CONTROL)
@@ -365,6 +439,10 @@ parseadas. Es lo que alimenta la vista previa de la pantalla de estudiantes.
 ---
 
 ## 8.1 Impresión para la imprenta
+
+> **La impresión es por categoría** (una tirada por categoría; ver sección 2 e
+> impresión en la 8). Lo de abajo aplica a cada tirada. Hoy solo ESTUDIANTE tiene
+> arte; el pliego de administrativo/particular está gateado por `plantillaDisponible`.
 
 La hoja es **OFICIO en vertical: 21.5 x 33 cm**. El arte del ticket tiene proporción
 **2524:839 = 3.008:1**.
@@ -451,8 +529,11 @@ El campo `dentro` en Ticket permite responder rápido "¿quién está adentro?";
 histórico completo queda en `Acceso`.
 
 ### Pendiente
-Lógica de emisión (generar código + QR), relleno de la plantilla PNG a PDF,
-endpoint de escaneo y monitoreo. Ver sección 2.
+Emisión y relleno del ticket para **administrativo** y **particular** (falta el arte
+PNG + generalizar `TicketRenderer`), emisión/pantalla de **particular** (venta manual,
+no existe aún), endpoint de **escaneo** y **monitoreo**. Ver sección 2.
+Ya hecho: emisión estudiante y administrativo (código + QR), relleno PNG→PDF de
+estudiante, impresión por categoría.
 
 ---
 
@@ -483,3 +564,18 @@ endpoint de escaneo y monitoreo. Ver sección 2.
   `GET /api/tickets/{id}/png|pdf` con datos reales de BD → verificado visualmente.
 - Nota: los ids de ticket pueden tener huecos si un insert falló (IDENTITY no
   reutiliza); el `codigoIdentificacion` sí es correlativo por categoría.
+
+**Sesión 5 (componentes reutilizables + paridad administrativo + impresión por categoría):**
+- Corregido: `aplication-jarv.properties` → `application-jarv.properties` (el perfil
+  `jarv` no cargaba y quedaba fuera del `.gitignore`).
+- Base UI reutilizable creada y aplicada a TODAS las vistas: `ModalBase`, `Alerta` +
+  `AlertasHost` (`useAlertas`), `ConfirmDialog` (`useConfirmacion`), `CsvDropzone`,
+  `utils/errores`. `npm run build` OK.
+- Administrativo nivelado con estudiante: `Utils/csv/CsvUtils` compartido; importar
+  con codificación + `previsualizar` + reimport-actualiza. Verificado en vivo:
+  previa UTF-8/encabezado OK, import 2/0, reimport 0/2, CP850 autodetectado, y
+  estudiante sin regresión.
+- Impresión por categoría: resumen/pliego/reiniciar con `categoria`;
+  `ResumenImpresionDto.plantillaDisponible`. Verificado: resumen por categoría OK,
+  pliego ESTUDIANTE → 200/PDF 1 pág, pliego ADMINISTRATIVO → 400 con mensaje amable.
+- `./mvnw compile` OK.

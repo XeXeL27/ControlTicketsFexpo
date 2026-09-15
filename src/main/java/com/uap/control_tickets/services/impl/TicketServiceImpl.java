@@ -10,8 +10,10 @@ import com.uap.control_tickets.enums.CategoriaTicket;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
+import com.uap.control_tickets.models.entity.Administrativo;
 import com.uap.control_tickets.models.entity.Estudiante;
 import com.uap.control_tickets.models.entity.Ticket;
+import com.uap.control_tickets.models.repository.AdministrativoDao;
 import com.uap.control_tickets.models.repository.EstudianteDao;
 import com.uap.control_tickets.models.repository.TicketDao;
 import com.uap.control_tickets.services.interfaces.TicketService;
@@ -39,6 +41,7 @@ public class TicketServiceImpl implements TicketService {
 
     private final TicketDao ticketDao;
     private final EstudianteDao estudianteDao;
+    private final AdministrativoDao administrativoDao;
     private final TicketRenderer ticketRenderer;
 
     /**
@@ -140,13 +143,24 @@ public class TicketServiceImpl implements TicketService {
     // Impresion por tandas
     // -------------------------------------------------------------------------
 
+    /**
+     * Por ahora solo la categoria ESTUDIANTE tiene plantilla de arte cargada.
+     * Las demas (ADMINISTRATIVO, EXTERNO) se pueden emitir y contar, pero todavia no
+     * se pueden imprimir hasta que llegue su arte.
+     */
+    private boolean plantillaDisponible(CategoriaTicket categoria) {
+        return categoria == CategoriaTicket.ESTUDIANTE;
+    }
+
     @Override
     @Transactional(readOnly = true)
-    public ResumenImpresionDto resumenImpresion(FormatoPliego formato) {
-        long impresos = ticketDao.countByImpresoAndEstado(true, EstadoRegistro.ACTIVO);
-        long pendientes = ticketDao.countByImpresoAndEstado(false, EstadoRegistro.ACTIVO);
+    public ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria) {
+        long impresos = ticketDao.countByCategoriaAndImpresoAndEstado(categoria, true, EstadoRegistro.ACTIVO);
+        long pendientes = ticketDao.countByCategoriaAndImpresoAndEstado(categoria, false, EstadoRegistro.ACTIVO);
 
         ResumenImpresionDto r = new ResumenImpresionDto();
+        r.setCategoria(categoria.name());
+        r.setPlantillaDisponible(plantillaDisponible(categoria));
         r.setTotal(impresos + pendientes);
         r.setImpresos(impresos);
         r.setPendientes(pendientes);
@@ -161,16 +175,22 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     @Transactional
-    public byte[] generarPliego(FormatoPliego formato, Integer cantidad,
+    public byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, Integer cantidad,
                                 boolean soloPendientes, boolean marcar) {
+        if (!plantillaDisponible(categoria)) {
+            throw new NegocioException(
+                    "La plantilla de arte de " + categoria + " todavia no esta cargada; "
+                            + "por ahora solo se puede imprimir la categoria ESTUDIANTE.");
+        }
+
         List<Ticket> candidatos = soloPendientes
-                ? ticketDao.findAllByImpresoFalseAndEstadoOrderByIdTicketAsc(EstadoRegistro.ACTIVO)
-                : ticketDao.findAllByEstado(EstadoRegistro.ACTIVO);
+                ? ticketDao.findAllByCategoriaAndImpresoFalseAndEstadoOrderByIdTicketAsc(categoria, EstadoRegistro.ACTIVO)
+                : ticketDao.findAllByCategoriaAndEstado(categoria, EstadoRegistro.ACTIVO);
 
         if (candidatos.isEmpty()) {
             throw new NegocioException(soloPendientes
-                    ? "No quedan tickets pendientes de imprimir"
-                    : "No hay tickets emitidos");
+                    ? "No quedan tickets pendientes de imprimir en esta categoria"
+                    : "No hay tickets emitidos en esta categoria");
         }
         // Se recorta a la cantidad pedida para poder imprimir de a tandas.
         if (cantidad != null && cantidad > 0 && cantidad < candidatos.size()) {
@@ -206,15 +226,39 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     @Transactional
-    public int reiniciarImpresion() {
-        List<Ticket> impresos = ticketDao.findAllByImpresoAndEstadoOrderByIdTicketAsc(
-                true, EstadoRegistro.ACTIVO);
+    public int reiniciarImpresion(CategoriaTicket categoria) {
+        List<Ticket> impresos = ticketDao.findAllByCategoriaAndImpresoAndEstadoOrderByIdTicketAsc(
+                categoria, true, EstadoRegistro.ACTIVO);
         for (Ticket t : impresos) {
             t.setImpreso(false);
             t.setFechaImpresion(null);
         }
         ticketDao.saveAll(impresos);
         return impresos.size();
+    }
+
+    @Override
+    @Transactional
+    public TicketDetalleDto emitirAdministrativo(Long idAdministrativo) {
+        Administrativo admin = administrativoDao.findById(idAdministrativo)
+                .filter(a -> a.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Administrativo no encontrado"));
+
+        var existente = ticketDao.findFirstByAdministrativoIdAdministrativoAndEstado(
+                idAdministrativo, EstadoRegistro.ACTIVO);
+        if (existente.isPresent()) {
+            return toDetalleDto(existente.get());
+        }
+
+        Ticket ticket = new Ticket();
+        ticket.setCategoria(CategoriaTicket.ADMINISTRATIVO);
+        ticket.setPersona(admin.getPersona());
+        ticket.setAdministrativo(admin);
+        ticket.setQrToken(nuevoQrToken());
+        ticket.setCodigoIdentificacion(nuevoCodigo("ADM", CategoriaTicket.ADMINISTRATIVO));
+        ticket.setDentro(false);
+
+        return toDetalleDto(ticketDao.save(ticket));
     }
 
     @Override

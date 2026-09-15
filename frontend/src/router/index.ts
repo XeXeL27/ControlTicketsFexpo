@@ -6,6 +6,7 @@ import { auth } from '@/store/auth'
 import Login from '@/views/Login.vue'
 import Home from '@/views/Home.vue'
 import Estudiantes from '@/views/Estudiantes.vue'
+import Administrativos from '@/views/Administrativos.vue'
 import Impresion from '@/views/Impresion.vue'
 import Personas from '@/views/Personas.vue'
 import Usuarios from '@/views/Usuarios.vue'
@@ -15,6 +16,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/login', component: Login, meta: { publico: true } },
   { path: '/', component: Home },
   { path: '/estudiantes', component: Estudiantes },
+  { path: '/administrativos', component: Administrativos },
   { path: '/impresion', component: Impresion },
   { path: '/personas', component: Personas },
   { path: '/usuarios', component: Usuarios },

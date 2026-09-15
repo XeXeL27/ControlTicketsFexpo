@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Pantalla de Estudiantes: importar CSV, listar, crear, emitir tickets y ver/descargar.
-// La tabla (buscador + paginacion) la aporta el componente reutilizable TablaDatos.
+// Pantalla de Administrativos: importar CSV (dropzone), listar (TablaDatos), crear,
+// emitir tickets (uno o los que falten) y ver QR.
+// Nota: aún no hay plantilla de ticket de administrativo, así que "ver" muestra el QR.
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
@@ -10,109 +11,102 @@ import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
 import {
-  crearEstudiante,
-  eliminarEstudiante,
-  importarEstudiantesCsv,
-  listarEstudiantes,
-  previsualizarCsv,
-} from '@/api/estudiante.service'
-import {
-  emitirTicketEstudiante,
-  emitirTicketsMasivo,
-  obtenerTicketPdf,
-  obtenerTicketPng,
-} from '@/api/ticket.service'
+  crearAdministrativo,
+  eliminarAdministrativo,
+  importarAdministrativosCsv,
+  listarAdministrativos,
+  previsualizarAdministrativosCsv,
+} from '@/api/administrativo.service'
+import { emitirTicketAdministrativo, obtenerTicketQr } from '@/api/ticket.service'
 import type {
-  EstudianteDetalleDto,
-  EstudianteDto,
-  ImportacionResultadoDto,
-  PrevisualizacionCsvDto,
-} from '@/types/estudiante.type'
-import type { EmisionMasivaDto } from '@/types/ticket.type'
+  AdministrativoDetalleDto,
+  AdministrativoDto,
+  PrevisualizacionAdmCsvDto,
+} from '@/types/administrativo.type'
+import type { ImportacionResultadoDto } from '@/types/estudiante.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
 const alertas = useAlertas()
 const { confirmar } = useConfirmacion()
 
-const estudiantes = ref<EstudianteDetalleDto[]>([])
+const administrativos = ref<AdministrativoDetalleDto[]>([])
 const cargando = ref(false)
 
-// --- Importación CSV ---
+// Importación CSV
 const archivo = ref<File | null>(null)
 const importando = ref(false)
 const resultado = ref<ImportacionResultadoDto | null>(null)
-// Vista previa: la calcula el servidor con el MISMO parser que la importacion
-// real, asi lo que se ve aca es exactamente lo que se va a guardar.
-const previa = ref<PrevisualizacionCsvDto | null>(null)
+// Vista previa: la calcula el backend con el MISMO parser que la importación real.
+const previa = ref<PrevisualizacionAdmCsvDto | null>(null)
 const previsualizando = ref(false)
 
-// --- Emisión masiva ---
+// Filtro con/sin ticket
+const filtroTicket = ref<'' | 'con' | 'sin'>('')
+
+// Generación en lote
 const emitiendo = ref(false)
-const resultadoEmision = ref<EmisionMasivaDto | null>(null)
 
-// --- Filtro por carrera ---
-const carreraSel = ref('')
-
-// --- Modal alta individual ---
+// Modal alta
 const mostrarModal = ref(false)
-const form = ref<EstudianteDto>(formVacio())
+const form = ref<AdministrativoDto>(formVacio())
 const errorForm = ref('')
 
-// --- Modal ver ticket ---
-const mostrarTicket = ref(false)
-const ticketUrl = ref('')          // object URL del PNG
-const ticketIdActual = ref<number | null>(null)
+// Modal ver QR
+const mostrarQr = ref(false)
+const qrUrl = ref('')
+const codigoActual = ref('')
 
 const columnas: ColumnaTabla[] = [
-  { clave: 'ru', titulo: 'R.U.', ancho: '100px' },
+  { clave: 'codigoAdministrativo', titulo: 'Código adm.', ancho: '140px' },
   { clave: 'nombreCompleto', titulo: 'Nombre completo' },
-  { clave: 'ci', titulo: 'CI', ancho: '110px' },
-  { clave: 'carrera', titulo: 'Carrera' },
+  { clave: 'ci', titulo: 'CI', ancho: '120px' },
   { clave: 'codigoTicket', titulo: 'Ticket', ancho: '140px' },
 ]
 
-/** Carreras presentes en los datos, para el desplegable del filtro. */
-const carreras = computed(() => {
-  const set = new Set<string>()
-  for (const e of estudiantes.value) {
-    if (e.carrera) set.add(e.carrera)
-  }
-  return [...set].sort((a, b) => a.localeCompare(b, 'es'))
+const sinTicket = computed(() => administrativos.value.filter((a) => !a.idTicket))
+const conTicket = computed(() => administrativos.value.filter((a) => a.idTicket))
+
+/** Filas que ve la tabla, segun el filtro de ticket (el buscador lo aplica TablaDatos). */
+const filas = computed(() => {
+  if (filtroTicket.value === 'con') return conTicket.value
+  if (filtroTicket.value === 'sin') return sinTicket.value
+  return administrativos.value
 })
 
-/** Lo que ve la tabla: ya filtrado por carrera (el buscador lo aplica TablaDatos). */
-const estudiantesFiltrados = computed(() => {
-  if (!carreraSel.value) return estudiantes.value
-  return estudiantes.value.filter((e) => e.carrera === carreraSel.value)
-})
-
-/** Cuantos de los que se ven todavia no tienen ticket. */
-const sinTicket = computed(() => estudiantesFiltrados.value.filter((e) => !e.idTicket))
-
-function formVacio(): EstudianteDto {
-  return { nombre: '', paterno: '', materno: '', ci: '', ru: '', facultad: '', carrera: '' }
+function formVacio(): AdministrativoDto {
+  return { nombre: '', paterno: '', materno: '', ci: '', codigoAdministrativo: '' }
 }
 
 async function cargar() {
   cargando.value = true
   try {
-    estudiantes.value = await listarEstudiantes()
+    administrativos.value = await listarAdministrativos()
   } catch (e) {
-    alertas.error(mensajeError(e, 'Error al cargar estudiantes'))
+    alertas.error(mensajeError(e, 'Error al cargar administrativos'))
   } finally {
     cargando.value = false
   }
 }
 
-// --- CSV ---
-// El CsvDropzone maneja arrastrar/soltar y la validacion .csv; aca solo reaccionamos
-// al archivo elegido lanzando la previa (con el mismo parser del backend).
+/** Nombre legible de la codificacion detectada por el backend. */
+function nombreCodificacion(c: string) {
+  if (c === 'UTF-8') return 'UTF-8'
+  if (c === 'IBM850') return 'CP850 (CSV MS-DOS de Excel)'
+  if (c.toLowerCase().includes('1252')) return 'Windows-1252 (CSV de Excel)'
+  return c
+}
+
+const previaConAvisos = computed(
+  () => previa.value?.filas.filter((f) => f.advertencia).length ?? 0,
+)
+
+/** Al elegir un archivo se previsualiza solo, antes de tocar la base. */
 async function alElegir(f: File) {
   previa.value = null
   resultado.value = null
   previsualizando.value = true
   try {
-    previa.value = await previsualizarCsv(f)
+    previa.value = await previsualizarAdministrativosCsv(f)
   } catch (e) {
     alertas.error(mensajeError(e, 'No se pudo leer el archivo'))
     archivo.value = null
@@ -126,25 +120,12 @@ function quitarArchivo() {
   resultado.value = null
 }
 
-/** Nombre legible de la codificacion detectada por el backend. */
-function nombreCodificacion(c: string) {
-  if (c === 'UTF-8') return 'UTF-8'
-  if (c === 'IBM850') return 'CP850 (CSV MS-DOS de Excel)'
-  if (c.toLowerCase().includes('1252')) return 'Windows-1252 (CSV de Excel)'
-  return c
-}
-
-/** Filas de la previa que tienen algun aviso de codificacion. */
-const previaConAvisos = computed(
-  () => previa.value?.filas.filter((f) => f.advertencia).length ?? 0,
-)
-
 async function importar() {
   if (!archivo.value) return
   importando.value = true
   resultado.value = null
   try {
-    resultado.value = await importarEstudiantesCsv(archivo.value)
+    resultado.value = await importarAdministrativosCsv(archivo.value)
     previa.value = null
     archivo.value = null
     alertas.exito(
@@ -158,7 +139,6 @@ async function importar() {
   }
 }
 
-// --- Alta individual ---
 function nuevo() {
   form.value = formVacio()
   errorForm.value = ''
@@ -168,36 +148,35 @@ function nuevo() {
 async function guardar() {
   errorForm.value = ''
   try {
-    await crearEstudiante(form.value)
+    await crearAdministrativo(form.value)
     mostrarModal.value = false
-    alertas.exito('Estudiante creado')
+    alertas.exito('Administrativo creado')
     await cargar()
   } catch (e) {
     errorForm.value = mensajeError(e, 'Error al guardar')
   }
 }
 
-async function eliminar(est: EstudianteDetalleDto) {
+async function eliminar(a: AdministrativoDetalleDto) {
   const ok = await confirmar({
-    titulo: 'Eliminar estudiante',
-    mensaje: `¿Eliminar a ${est.nombreCompleto}?`,
+    titulo: 'Eliminar administrativo',
+    mensaje: `¿Eliminar a ${a.nombreCompleto}?`,
     textoConfirmar: 'Eliminar',
     peligro: true,
   })
   if (!ok) return
   try {
-    await eliminarEstudiante(est.idEstudiante)
-    alertas.exito('Estudiante eliminado')
+    await eliminarAdministrativo(a.idAdministrativo)
+    alertas.exito('Administrativo eliminado')
     await cargar()
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al eliminar'))
   }
 }
 
-// --- Tickets ---
-async function emitir(est: EstudianteDetalleDto) {
+async function emitir(a: AdministrativoDetalleDto) {
   try {
-    await emitirTicketEstudiante(est.idEstudiante)
+    await emitirTicketAdministrativo(a.idAdministrativo)
     alertas.exito('Ticket emitido')
     await cargar()
   } catch (e) {
@@ -205,73 +184,58 @@ async function emitir(est: EstudianteDetalleDto) {
   }
 }
 
-/**
- * Genera los tickets que falten. Si hay un filtro de carrera activo se emite
- * solo para esa carrera; si no, para todos los estudiantes registrados.
- */
-async function emitirTodos() {
+/** Genera los tickets que falten (uno por uno; el backend es idempotente). */
+async function emitirFaltantes() {
   const objetivo = sinTicket.value
   if (!objetivo.length) return
-  const desc = carreraSel.value ? `la carrera "${carreraSel.value}"` : 'todos los registrados'
   const ok = await confirmar({
     titulo: 'Generar tickets',
-    mensaje: `Se generarán ${objetivo.length} ticket(s) para ${desc}. ¿Continuar?`,
+    mensaje: `Se generarán ${objetivo.length} ticket(s) para los administrativos sin ticket. ¿Continuar?`,
     textoConfirmar: 'Generar',
   })
   if (!ok) return
 
   emitiendo.value = true
-  resultadoEmision.value = null
+  let emitidos = 0
+  let fallidos = 0
   try {
-    // Sin filtro se manda sin lista: el backend toma a todos los activos.
-    const ids = carreraSel.value ? objetivo.map((e) => e.idEstudiante) : undefined
-    resultadoEmision.value = await emitirTicketsMasivo(ids)
-    alertas.exito(`Emitidos ${resultadoEmision.value.emitidos} ticket(s)`)
+    for (const a of objetivo) {
+      try {
+        await emitirTicketAdministrativo(a.idAdministrativo)
+        emitidos++
+      } catch {
+        fallidos++
+      }
+    }
+    if (fallidos) alertas.info(`Emitidos ${emitidos}, con error ${fallidos}`)
+    else alertas.exito(`Emitidos ${emitidos} ticket(s)`)
     await cargar()
-  } catch (e) {
-    alertas.error(mensajeError(e, 'Error al generar los tickets'))
   } finally {
     emitiendo.value = false
   }
 }
 
-async function verTicket(est: EstudianteDetalleDto) {
-  if (!est.idTicket) return
+async function verQr(a: AdministrativoDetalleDto) {
+  if (!a.idTicket) return
   try {
-    const blob = await obtenerTicketPng(est.idTicket)
-    liberarUrl()
-    ticketUrl.value = URL.createObjectURL(blob)
-    ticketIdActual.value = est.idTicket
-    mostrarTicket.value = true
+    const blob = await obtenerTicketQr(a.idTicket)
+    liberar()
+    qrUrl.value = URL.createObjectURL(blob)
+    codigoActual.value = a.codigoTicket || ''
+    mostrarQr.value = true
   } catch (e) {
-    alertas.error(mensajeError(e, 'Error al obtener el ticket'))
+    alertas.error(mensajeError(e, 'Error al obtener el QR'))
   }
 }
 
-async function descargarPdf() {
-  if (!ticketIdActual.value) return
-  try {
-    const blob = await obtenerTicketPdf(ticketIdActual.value)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `ticket-${ticketIdActual.value}.pdf`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    alertas.error(mensajeError(e, 'Error al descargar el PDF'))
-  }
+function cerrarQr() {
+  mostrarQr.value = false
+  liberar()
 }
-
-function cerrarTicket() {
-  mostrarTicket.value = false
-  liberarUrl()
-}
-
-function liberarUrl() {
-  if (ticketUrl.value) {
-    URL.revokeObjectURL(ticketUrl.value)
-    ticketUrl.value = ''
+function liberar() {
+  if (qrUrl.value) {
+    URL.revokeObjectURL(qrUrl.value)
+    qrUrl.value = ''
   }
 }
 
@@ -281,21 +245,18 @@ onMounted(cargar)
 <template>
   <div>
     <div class="fila" style="justify-content:space-between;margin-bottom:16px">
-      <h2 style="margin:0">Estudiantes</h2>
-      <button @click="nuevo">+ Nuevo estudiante</button>
+      <h2 style="margin:0">Administrativos</h2>
+      <button @click="nuevo">+ Nuevo administrativo</button>
     </div>
 
     <!-- Importación CSV -->
     <div class="card" style="margin-bottom:16px">
       <strong>Carga masiva por CSV</strong>
       <p class="ayuda">
-        Columnas en este orden: <code>R.U., nombre completo, CI, carrera</code>
-        (separador <code>,</code> o <code>;</code>). Si la primera fila es el encabezado
-        se saltea sola. Volver a subir el mismo padrón <strong>actualiza</strong> los
-        estudiantes que ya existan (se reconocen por el R.U.).
+        Columnas en este orden: <code>código administrativo, nombre completo, ci</code>
+        (separador <code>,</code> o <code>;</code>). Si la primera fila es el encabezado se saltea sola.
       </p>
 
-      <!-- Selector de archivo reutilizable (arrastrar/soltar) -->
       <CsvDropzone
         v-model="archivo"
         :deshabilitado="importando"
@@ -353,17 +314,16 @@ onMounted(cargar)
             <thead>
               <tr>
                 <th style="width:50px">#</th>
-                <th style="width:90px">R.U.</th>
+                <th style="width:140px">Código adm.</th>
                 <th>Nombre completo</th>
-                <th style="width:110px">CI</th>
-                <th>Carrera</th>
+                <th style="width:120px">CI</th>
                 <th style="width:120px">Acción</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="f in previa.filas" :key="f.fila">
                 <td style="color:var(--texto-suave)">{{ f.fila }}</td>
-                <td>{{ f.ru || '—' }}</td>
+                <td>{{ f.codigoAdministrativo || '—' }}</td>
                 <td>
                   {{ f.nombreCompleto || '—' }}
                   <div v-if="f.advertencia" class="error" style="margin:2px 0 0">
@@ -371,7 +331,6 @@ onMounted(cargar)
                   </div>
                 </td>
                 <td>{{ f.ci || '—' }}</td>
-                <td>{{ f.carrera || '—' }}</td>
                 <td>
                   <span v-if="f.estado === 'NUEVO'" class="chip" style="background:#dcfce7;color:#166534">
                     Nuevo
@@ -408,53 +367,36 @@ onMounted(cargar)
           <strong>Generar tickets</strong>
           <p style="color:var(--texto-suave);font-size:13px;margin:6px 0 0">
             <template v-if="sinTicket.length">
-              Faltan <strong>{{ sinTicket.length }}</strong> ticket(s)
-              {{ carreraSel ? `en "${carreraSel}"` : 'en total' }}.
-              Los que ya tienen no se duplican.
+              Faltan <strong>{{ sinTicket.length }}</strong> ticket(s) de
+              {{ administrativos.length }} administrativo(s). Los que ya tienen no se duplican.
             </template>
             <template v-else>
-              Todos los estudiantes {{ carreraSel ? `de "${carreraSel}"` : 'registrados' }}
-              ya tienen su ticket.
+              Todos los administrativos registrados ya tienen su ticket.
             </template>
           </p>
         </div>
-        <button :disabled="emitiendo || !sinTicket.length" @click="emitirTodos">
-          {{ emitiendo ? 'Generando...' : `Generar tickets (${sinTicket.length})` }}
+        <button :disabled="emitiendo || !sinTicket.length" @click="emitirFaltantes">
+          {{ emitiendo ? 'Generando...' : `Generar faltantes (${sinTicket.length})` }}
         </button>
       </div>
-      <Alerta v-if="resultadoEmision" :tipo="resultadoEmision.errores.length ? 'info' : 'exito'" cerrable @cerrar="resultadoEmision = null">
-        Procesados {{ resultadoEmision.totalEstudiantes }} ·
-        emitidos {{ resultadoEmision.emitidos }} ·
-        ya tenían {{ resultadoEmision.omitidos }}
-        <span v-if="resultadoEmision.errores.length">· {{ resultadoEmision.errores.length }} con error</span>
-        <ul v-if="resultadoEmision.errores.length" style="margin:6px 0 0;padding-left:18px">
-          <li v-for="er in resultadoEmision.errores" :key="er.idEstudiante">
-            {{ er.nombreCompleto }}: {{ er.motivo }}
-          </li>
-        </ul>
-      </Alerta>
     </div>
 
-    <!-- Tabla reutilizable: buscador + paginacion -->
+    <!-- Tabla reutilizable -->
     <TablaDatos
       :columnas="columnas"
-      :filas="estudiantesFiltrados"
-      clave="idEstudiante"
+      :filas="filas"
+      clave="idAdministrativo"
       :cargando="cargando"
       :por-pagina="15"
       placeholder-busqueda="Buscar..."
-      texto-vacio="Sin estudiantes registrados."
+      texto-vacio="Sin administrativos registrados."
     >
-      <!-- Filtro por carrera, al lado del buscador -->
       <template #herramientas>
-        <select v-model="carreraSel" style="max-width:260px">
-          <option value="">Todas las carreras ({{ estudiantes.length }})</option>
-          <option v-for="c in carreras" :key="c" :value="c">{{ c }}</option>
+        <select v-model="filtroTicket" style="max-width:220px">
+          <option value="">Todos ({{ administrativos.length }})</option>
+          <option value="con">Con ticket ({{ conTicket.length }})</option>
+          <option value="sin">Sin ticket ({{ sinTicket.length }})</option>
         </select>
-      </template>
-
-      <template #col-carrera="{ fila }">
-        {{ fila.carrera || fila.facultad || '-' }}
       </template>
 
       <template #col-codigoTicket="{ valor }">
@@ -464,35 +406,37 @@ onMounted(cargar)
 
       <template #acciones="{ fila }">
         <button v-if="!fila.idTicket" @click="emitir(fila)">Emitir ticket</button>
-        <button v-else class="secundario" @click="verTicket(fila)">Ver ticket</button>
+        <button v-else class="secundario" @click="verQr(fila)">Ver QR</button>
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>
       </template>
     </TablaDatos>
 
     <!-- Modal alta individual -->
-    <ModalBase v-if="mostrarModal" titulo="Nuevo estudiante" @cerrar="mostrarModal = false">
-      <form id="form-estudiante" @submit.prevent="guardar">
+    <ModalBase v-if="mostrarModal" titulo="Nuevo administrativo" @cerrar="mostrarModal = false">
+      <form id="form-admin" @submit.prevent="guardar">
+        <label>Código administrativo *</label><input v-model="form.codigoAdministrativo" required />
         <label>Nombre *</label><input v-model="form.nombre" required />
         <label>Paterno *</label><input v-model="form.paterno" required />
         <label>Materno</label><input v-model="form.materno" />
         <label>CI *</label><input v-model="form.ci" required />
-        <label>R.U. *</label><input v-model="form.ru" required />
-        <label>Facultad</label><input v-model="form.facultad" />
-        <label>Carrera</label><input v-model="form.carrera" />
         <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
       </form>
       <template #pie>
         <button type="button" class="secundario" @click="mostrarModal = false">Cancelar</button>
-        <button type="submit" form="form-estudiante">Guardar</button>
+        <button type="submit" form="form-admin">Guardar</button>
       </template>
     </ModalBase>
 
-    <!-- Modal ver ticket -->
-    <ModalBase v-if="mostrarTicket" titulo="Ticket" ancho="auto" @cerrar="cerrarTicket">
-      <img :src="ticketUrl" alt="Ticket" style="max-width:80vw;max-height:60vh;border:1px solid var(--borde)" />
+    <!-- Modal ver QR -->
+    <ModalBase v-if="mostrarQr" :titulo="`Ticket ${codigoActual}`" @cerrar="cerrarQr">
+      <div style="text-align:center">
+        <p style="color:var(--texto-suave);font-size:13px;margin-top:0">
+          (Aún sin plantilla de administrativo; se muestra el QR)
+        </p>
+        <img :src="qrUrl" alt="QR" style="width:260px;height:260px" />
+      </div>
       <template #pie>
-        <button class="secundario" @click="cerrarTicket">Cerrar</button>
-        <button @click="descargarPdf">Descargar PDF</button>
+        <button class="secundario" @click="cerrarQr">Cerrar</button>
       </template>
     </ModalBase>
   </div>
@@ -500,7 +444,6 @@ onMounted(cargar)
 
 <style scoped>
 .ayuda { color: var(--texto-suave); font-size: 13px; margin: 6px 0; }
-
 .previa { margin-top: 16px; }
 .tarjetas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .dato {

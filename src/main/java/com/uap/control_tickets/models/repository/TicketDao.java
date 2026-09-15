@@ -24,6 +24,9 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
     // Ticket ya emitido para un estudiante (para no duplicar).
     Optional<Ticket> findFirstByEstudianteIdEstudianteAndEstado(Long idEstudiante, EstadoRegistro estado);
 
+    // Ticket ya emitido para un administrativo.
+    Optional<Ticket> findFirstByAdministrativoIdAdministrativoAndEstado(Long idAdministrativo, EstadoRegistro estado);
+
     // --- Listados ---
     List<Ticket> findAllByEstado(EstadoRegistro estado);
 
@@ -38,6 +41,13 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
     List<Ticket> findAllByImpresoAndEstadoOrderByIdTicketAsc(boolean impreso, EstadoRegistro estado);
 
     long countByImpresoAndEstado(boolean impreso, EstadoRegistro estado);
+
+    // --- Impresion por tandas, ACOTADA a una categoria (cada categoria se imprime aparte) ---
+    long countByCategoriaAndImpresoAndEstado(CategoriaTicket categoria, boolean impreso, EstadoRegistro estado);
+
+    List<Ticket> findAllByCategoriaAndImpresoFalseAndEstadoOrderByIdTicketAsc(CategoriaTicket categoria, EstadoRegistro estado);
+
+    List<Ticket> findAllByCategoriaAndImpresoAndEstadoOrderByIdTicketAsc(CategoriaTicket categoria, boolean impreso, EstadoRegistro estado);
 
     // --- Monitoreo en tiempo real ---
     List<Ticket> findAllByDentroTrueAndEstado(EstadoRegistro estado);

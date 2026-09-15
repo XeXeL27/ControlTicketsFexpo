@@ -2,7 +2,9 @@ package com.uap.control_tickets.controllers;
 
 import com.uap.control_tickets.dto.ticket.EmisionMasivaDto;
 import com.uap.control_tickets.dto.ticket.ResumenImpresionDto;
+import com.uap.control_tickets.enums.CategoriaTicket;
 import com.uap.control_tickets.enums.FormatoPliego;
+import com.uap.control_tickets.Utils.qr.QrGenerator;
 import com.uap.control_tickets.dto.ticket.TicketDetalleDto;
 import com.uap.control_tickets.services.interfaces.TicketService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,6 +31,7 @@ import java.util.List;
 public class TicketController {
 
     private final TicketService ticketService;
+    private final QrGenerator qrGenerator;
 
     @GetMapping("/listar")
     @Operation(summary = "Listar tickets emitidos")
@@ -66,25 +69,28 @@ public class TicketController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/impresion/resumen")
-    @Operation(summary = "Cuantos tickets se imprimieron, cuantos faltan y cuantas hojas se necesitan")
+    @Operation(summary = "Estado de impresion de UNA categoria: impresos, pendientes y hojas")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ResumenImpresionDto> resumenImpresion(
-            @RequestParam(defaultValue = "MIXTO_8") FormatoPliego formato) {
-        return ResponseEntity.ok(ticketService.resumenImpresion(formato));
+            @RequestParam(defaultValue = "MIXTO_8") FormatoPliego formato,
+            @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria) {
+        return ResponseEntity.ok(ticketService.resumenImpresion(formato, categoria));
     }
 
     @PostMapping(value = "/impresion/pliego", produces = MediaType.APPLICATION_PDF_VALUE)
-    @Operation(summary = "Genera el PDF del pliego (hojas oficio con varios tickets) "
-            + "y por defecto marca esos tickets como impresos")
+    @Operation(summary = "Genera el PDF del pliego de una categoria (hojas oficio con varios "
+            + "tickets) y por defecto marca esos tickets como impresos")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> generarPliego(
             @RequestParam(defaultValue = "MIXTO_8") FormatoPliego formato,
+            @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria,
             @RequestParam(required = false) Integer cantidad,
             @RequestParam(defaultValue = "true") boolean soloPendientes,
             @RequestParam(defaultValue = "true") boolean marcar) {
-        byte[] pdf = ticketService.generarPliego(formato, cantidad, soloPendientes, marcar);
+        byte[] pdf = ticketService.generarPliego(formato, categoria, cantidad, soloPendientes, marcar);
         return ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename=pliego-tickets.pdf")
+                .header("Content-Disposition",
+                        "attachment; filename=pliego-" + categoria.name().toLowerCase() + ".pdf")
                 .body(pdf);
     }
 
@@ -98,10 +104,30 @@ public class TicketController {
     }
 
     @PostMapping("/impresion/reiniciar")
-    @Operation(summary = "Deja todos los tickets como NO impresos (reinicia la tanda)")
+    @Operation(summary = "Deja como NO impresos todos los tickets de una categoria (reinicia esa tanda)")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
-    public ResponseEntity<Integer> reiniciarImpresion() {
-        return ResponseEntity.ok(ticketService.reiniciarImpresion());
+    public ResponseEntity<Integer> reiniciarImpresion(
+            @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria) {
+        return ResponseEntity.ok(ticketService.reiniciarImpresion(categoria));
+    }
+
+    @PostMapping("/emitir-administrativo")
+    @Operation(summary = "Emitir el ticket de un administrativo ya cargado")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> emitirAdministrativo(@RequestParam Long idAdministrativo) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ticketService.emitirAdministrativo(idAdministrativo));
+    }
+
+    @GetMapping(value = "/{idTicket}/qr", produces = MediaType.IMAGE_PNG_VALUE)
+    @Operation(summary = "Solo el QR del ticket (PNG)",
+            description = "Útil para categorías sin plantilla de ticket todavía (ej. administrativo)")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    public ResponseEntity<byte[]> qr(@PathVariable Long idTicket) {
+        String contenido = ticketService.obtener(idTicket).getQrToken();
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .body(qrGenerator.generarPng(contenido, 320));
     }
 
     @GetMapping(value = "/{idTicket}/png", produces = MediaType.IMAGE_PNG_VALUE)
