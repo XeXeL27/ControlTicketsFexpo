@@ -20,6 +20,10 @@ const alertas = useAlertas()
 /** Cual panel tiene la camara abierta (solo uno a la vez). */
 const activo = ref<TipoMovimiento | null>(null)
 
+/** Referencias a los paneles para poder limpiar el resultado del otro. */
+const refEntrada = ref<InstanceType<typeof PanelEscaneo> | null>(null)
+const refSalida = ref<InstanceType<typeof PanelEscaneo> | null>(null)
+
 /** Modal de consulta puntual de matricula por RU. */
 const mostrarConsultaRu = ref(false)
 
@@ -27,6 +31,10 @@ const dentro = ref<PersonaDentroDto[]>([])
 const cargandoDentro = ref(false)
 
 function abrir(tipo: TipoMovimiento): void {
+  // Al abrir un escaner se limpia el resultado del otro, para que cada
+  // escaneo arranque limpio y no queden datos de la operacion anterior.
+  if (tipo === 'ENTRADA') refSalida.value?.limpiar()
+  else refEntrada.value?.limpiar()
   activo.value = tipo
 }
 
@@ -77,6 +85,7 @@ const columnas = [
 
     <div class="columnas">
       <PanelEscaneo
+        ref="refEntrada"
         tipo="ENTRADA"
         titulo="Escaner de ENTRADA"
         :activo="activo === 'ENTRADA'"
@@ -85,6 +94,7 @@ const columnas = [
         @validado="cargarDentro()"
       />
       <PanelEscaneo
+        ref="refSalida"
         tipo="SALIDA"
         titulo="Escaner de SALIDA"
         :activo="activo === 'SALIDA'"

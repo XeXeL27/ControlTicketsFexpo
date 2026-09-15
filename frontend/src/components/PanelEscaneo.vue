@@ -124,6 +124,17 @@ function formatearHora(iso?: string): string {
   if (!iso) return '-'
   return new Date(iso).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+
+/** Limpia el resultado de este panel. El padre lo llama al abrir el OTRO
+ *  escaner, para que cada escaneo arranque limpio y no queden datos viejos. */
+function limpiar(): void {
+  resultado.value = null
+  errorValidacion.value = ''
+  manual.value = ''
+  mostrarAviso.value = false
+}
+
+defineExpose({ limpiar })
 </script>
 
 <template>
@@ -179,14 +190,27 @@ function formatearHora(iso?: string): string {
 
       <p v-if="resultado.mensaje" class="motivo">{{ resultado.mensaje }}</p>
 
+      <!-- Foto + nombre: lo primero para reconocer a la persona. La foto existe
+           solo para estudiantes (la trae la consulta de matricula, que ocurre
+           unicamente al ENTRAR; al SALIR no hay matricula ni foto). -->
+      <div class="identificacion">
+        <img
+          v-if="resultado.sigse?.data?.url_imagen"
+          :src="resultado.sigse.data.url_imagen"
+          alt="Foto del estudiante"
+          class="foto"
+        />
+        <div class="identificacion-texto">
+          <strong class="nombre-completo">{{ resultado.nombreCompleto }}</strong>
+          <span class="resumen-campos">{{ nombreCategoria(resultado.categoria) }} · CI {{ resultado.ci }}</span>
+          <span v-if="resultado.ru" class="resumen-campos">RU {{ resultado.ru }}</span>
+          <span v-else-if="resultado.codigoAdministrativo" class="resumen-campos">Codigo {{ resultado.codigoAdministrativo }}</span>
+        </div>
+      </div>
+
       <ul class="datos">
-        <li><b>Categoria:</b> {{ nombreCategoria(resultado.categoria) }}</li>
-        <li><b>Persona:</b> {{ resultado.nombreCompleto }}</li>
-        <li><b>CI:</b> {{ resultado.ci }}</li>
-        <li v-if="resultado.ru"><b>RU:</b> {{ resultado.ru }}</li>
         <li v-if="resultado.carrera"><b>Carrera:</b> {{ resultado.carrera }}</li>
         <li v-if="resultado.facultad"><b>Facultad:</b> {{ resultado.facultad }}</li>
-        <li v-if="resultado.codigoAdministrativo"><b>Codigo:</b> {{ resultado.codigoAdministrativo }}</li>
         <li>
           <b>Movimiento:</b>
           <template v-if="resultado.ultimoMovimiento">
@@ -196,29 +220,23 @@ function formatearHora(iso?: string): string {
         </li>
       </ul>
 
-      <!-- Datos de la matricula (solo estudiantes) -->
-      <template v-if="resultado.categoria === 'ESTUDIANTE'">
-        <div class="sigse">
-          <div class="fila">
-            <strong>Matricula:</strong>
-            <span v-if="resultado.matriculado === true" class="chip verde">MATRICULADO</span>
-            <span v-else-if="resultado.matriculado === false" class="chip rojo">NO MATRICULADO</span>
-            <span v-else class="chip gris">SIN CONFIRMACION</span>
-          </div>
-          <template v-if="resultado.sigse?.data">
-            <div class="fila"><span>Vigencia:</span><b>{{ resultado.sigse.data.vigencia }}</b></div>
-            <div class="fila"><span>Gestion:</span><b>{{ resultado.sigse.data.gestion }}</b></div>
-            <div class="fila"><span>Plan:</span><b>{{ resultado.sigse.data.plan }}</b></div>
-            <div class="fila"><span>Correo:</span><b>{{ resultado.sigse.data.correo }}</b></div>
-            <img
-              v-if="resultado.sigse.data.url_imagen"
-              :src="resultado.sigse.data.url_imagen"
-              alt="Foto del estudiante"
-              class="foto"
-            />
-          </template>
+      <!-- Datos de la matricula: SOLO se muestran en la ENTRADA de un estudiante
+           (el backend consulta unicamente al ingresar; en SALIDA no aplica y esta
+           seccion no aparece, asi cada escaneo muestra solo sus datos). -->
+      <div v-if="resultado.sigse" class="sigse">
+        <div class="fila">
+          <strong>Matricula:</strong>
+          <span v-if="resultado.matriculado === true" class="chip verde">MATRICULADO</span>
+          <span v-else-if="resultado.matriculado === false" class="chip rojo">NO MATRICULADO</span>
+          <span v-else class="chip gris">SIN CONFIRMACION</span>
         </div>
-      </template>
+        <template v-if="resultado.sigse.data">
+          <div class="fila"><span>Vigencia:</span><b>{{ resultado.sigse.data.vigencia }}</b></div>
+          <div class="fila"><span>Gestion:</span><b>{{ resultado.sigse.data.gestion }}</b></div>
+          <div class="fila"><span>Plan:</span><b>{{ resultado.sigse.data.plan }}</b></div>
+          <div class="fila"><span>Correo:</span><b>{{ resultado.sigse.data.correo }}</b></div>
+        </template>
+      </div>
     </div>
 
     <!-- Modal de aviso: movimiento rechazado (ya dentro / ya fuera / no matriculado) -->
@@ -306,6 +324,34 @@ function formatearHora(iso?: string): string {
 .datos { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 4px; }
 .datos li { font-size: 14px; color: var(--texto); display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* Identificacion: foto + nombre, lo primero que mira el portero */
+.identificacion {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 14px;
+  background: #f9fafb;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+}
+.foto {
+  width: 140px;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.identificacion-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.nombre-completo { font-size: 18px; line-height: 1.25; }
+.resumen-campos { font-size: 13px; color: var(--texto-suave); }
+
 .sigse {
   margin-top: 14px;
   padding-top: 12px;
@@ -317,18 +363,6 @@ function formatearHora(iso?: string): string {
 }
 .sigse .fila { display: flex; align-items: center; gap: 8px; }
 .sigse .fila span { color: var(--texto-suave); }
-/* Foto del estudiante: grande para reconocer en el celular, y responsiva
-   (llena el ancho disponible hasta un tope en pantallas grandes). */
-.foto {
-  width: 100%;
-  max-width: 280px;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-  border: 1px solid var(--borde);
-  border-radius: 8px;
-  margin-top: 8px;
-  display: block;
-}
 
 .chip {
   padding: 3px 10px;
@@ -376,6 +410,7 @@ function formatearHora(iso?: string): string {
   .resultado { flex-direction: column; align-items: flex-start; gap: 4px; }
   .resultado-codigo { margin-left: 0; }
   .sigse .fila { flex-wrap: wrap; }
-  .foto { max-width: none; }
+  .identificacion { flex-direction: column; align-items: center; text-align: center; }
+  .foto { width: 100%; max-width: 220px; }
 }
 </style>
