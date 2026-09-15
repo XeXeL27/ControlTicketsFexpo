@@ -4,15 +4,21 @@
 // responde 409 y el servicio lo convierte en la excepcion axios correspondiente;
 // la vista debe recoger el error.response.data como ValidacionTicketDto.
 import http from '@/api/http'
-import type { PersonaDentroDto, ValidacionTicketDto } from '@/types/control.type'
+import type { PersonaDentroDto, TipoMovimiento, ValidacionTicketDto } from '@/types/control.type'
 
 /**
- * Valida el codigo escaneado (qr_token) y registra la ENTRADA o SALIDA.
- * Devuelve el registro validado; lanza una excepcion axios si el ticket no
- * existe (404) o el ingreso fue bloqueado (409, cuerpo = ValidacionTicketDto).
+ * Valida el codigo escaneado (qr_token) con el escaner dedicado (tipoMovimiento).
+ * Devuelve el registro validado; lanza una excepcion axios si:
+ *  - el ticket no existe (404),
+ *  - el movimiento no coincide con el estado: ENTRADA estando dentro / SALIDA
+ *    estando fuera (400, cuerpo = { mensaje }),
+ *  - el ingreso fue bloqueado por SIGSE (409, cuerpo = ValidacionTicketDto).
  */
-export async function validarTicket(codigo: string): Promise<ValidacionTicketDto> {
-  const res = await http.post<ValidacionTicketDto>('/control/validar', { codigo })
+export async function validarTicket(
+  codigo: string,
+  tipoMovimiento: TipoMovimiento,
+): Promise<ValidacionTicketDto> {
+  const res = await http.post<ValidacionTicketDto>('/control/validar', { codigo, tipoMovimiento })
   return res.data
 }
 

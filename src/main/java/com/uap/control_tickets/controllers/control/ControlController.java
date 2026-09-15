@@ -23,8 +23,9 @@ import java.util.List;
  * Escaner de control de acceso (rol CONTROL / ADMINISTRADOR).
  *
  * Ruta base: /api/control (el prefijo /api lo agrega WebConfig).
- *  - POST /validar: escanea el qr_token, valida (SIGSE para estudiantes) y
- *    alterna ENTRADA/SALIDA. Devuelve 409 cuando el ingreso esta bloqueado.
+ *  - POST /validar: escanea el qr_token con el escaner dedicado (ENTRADA o
+ *    SALIDA). Rechaza duplicados (entrar estando dentro / salir estando fuera)
+ *    y, para estudiantes que entran, valida SIGSE (409 si no matriculado).
  *  - GET /dentro: quienes estan actualmente dentro del recinto.
  */
 @RestController
@@ -36,13 +37,14 @@ public class ControlController {
     private final ControlService controlService;
 
     @PostMapping("/validar")
-    @Operation(summary = "Valida el qr_token escaneado y registra ENTRADA/SALIDA",
-            description = "Busca el ticket por qr_token en la BD local, determina la categoria, "
-                    + "consulta SIGSE si es estudiante y alterna el estado dentro/fuera. "
-                    + "Si el estudiante no esta matriculado, el ingreso se bloquea (409).")
+    @Operation(summary = "Valida el qr_token escaneado y registra el movimiento del escaner",
+            description = "Busca el ticket por qr_token en la BD local y registra la ENTRADA o "
+                    + "SALIDA segun el escaner dedicado (tipoMovimiento). Rechaza intentos "
+                    + "duplicados con 400. Para estudiantes que entran consulta SIGSE: si no "
+                    + "esta matriculado, el ingreso se bloquea (409).")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<ValidacionTicketDto> validar(@Valid @RequestBody ValidacionRequestDto request) {
-        ValidacionTicketDto dto = controlService.validar(request.getCodigo());
+        ValidacionTicketDto dto = controlService.validar(request.getCodigo(), request.getTipoMovimiento());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
         return ResponseEntity.status(estado).body(dto);
     }

@@ -1,6 +1,9 @@
 // Refleja los DTOs del backend para el modulo de Control (validador de acceso).
 import type { CategoriaTicket } from '@/types/ticket.type'
 
+/** Escaner dedicado (coincide con TipoAcceso del backend). */
+export type TipoMovimiento = 'ENTRADA' | 'SALIDA'
+
 // --- Respuesta SIGSE (ApiResponseDto + EstudianteDto del backend) ---
 
 export interface DatosSigseDto {
