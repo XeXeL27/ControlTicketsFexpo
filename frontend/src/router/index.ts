@@ -11,10 +11,12 @@ import Impresion from '@/views/Impresion.vue'
 import Personas from '@/views/Personas.vue'
 import Usuarios from '@/views/Usuarios.vue'
 import Roles from '@/views/Roles.vue'
+import ControlValidador from '@/views/control/ControlValidador.vue'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: Login, meta: { publico: true } },
   { path: '/', component: Home },
+  { path: '/control', component: ControlValidador },
   { path: '/estudiantes', component: Estudiantes },
   { path: '/administrativos', component: Administrativos },
   { path: '/impresion', component: Impresion },

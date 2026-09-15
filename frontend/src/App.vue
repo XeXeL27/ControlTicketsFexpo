@@ -39,6 +39,7 @@ function cerrarSesion(): void {
     <div class="cuerpo">
       <nav class="menu">
         <router-link to="/">Inicio</router-link>
+        <router-link to="/control">Control de acceso</router-link>
         <router-link to="/estudiantes">Estudiantes</router-link>
         <router-link to="/administrativos">Administrativos</router-link>
         <router-link to="/impresion">Impresión</router-link>
