@@ -279,8 +279,8 @@ function formatearHora(iso?: string): string {
 .btn--salida:hover { background: var(--azul-osc); }
 
 .manual label { display: block; font-size: 13px; color: var(--texto-suave); margin-bottom: 6px; }
-.manual .fila { display: flex; gap: 8px; }
-.manual input { flex: 1; }
+.manual .fila { display: flex; gap: 8px; flex-wrap: wrap; }
+.manual input { flex: 1; min-width: 140px; }
 
 .procesando { color: var(--texto-suave); font-size: 13px; }
 
@@ -317,13 +317,17 @@ function formatearHora(iso?: string): string {
 }
 .sigse .fila { display: flex; align-items: center; gap: 8px; }
 .sigse .fila span { color: var(--texto-suave); }
+/* Foto del estudiante: grande para reconocer en el celular, y responsiva
+   (llena el ancho disponible hasta un tope en pantallas grandes). */
 .foto {
-  width: 70px;
-  height: 90px;
+  width: 100%;
+  max-width: 280px;
+  aspect-ratio: 3 / 4;
   object-fit: cover;
   border: 1px solid var(--borde);
-  border-radius: 6px;
-  margin-top: 6px;
+  border-radius: 8px;
+  margin-top: 8px;
+  display: block;
 }
 
 .chip {
@@ -363,4 +367,15 @@ function formatearHora(iso?: string): string {
 .aviso--ya_dentro { background: #fef2f2; border-color: #dc2626; color: #991b1b; }
 .aviso--ya_fuera { background: #fffbeb; border-color: #d97706; color: #92400e; }
 .aviso--no_matriculado { background: #fef2f2; border-color: #dc2626; color: #991b1b; }
+
+/* Celular: controles tactiles grandes y todo a una columna */
+@media (max-width: 520px) {
+  .manual .fila { flex-direction: column; }
+  .manual .fila button { width: 100%; padding: 12px; font-size: 16px; }
+  .btn-escaneo { font-size: 17px; padding: 20px; }
+  .resultado { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .resultado-codigo { margin-left: 0; }
+  .sigse .fila { flex-wrap: wrap; }
+  .foto { max-width: none; }
+}
 </style>
