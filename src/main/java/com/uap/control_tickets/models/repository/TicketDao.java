@@ -49,6 +49,16 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
 
     List<Ticket> findAllByCategoriaAndImpresoAndEstadoOrderByIdTicketAsc(CategoriaTicket categoria, boolean impreso, EstadoRegistro estado);
 
+    // --- Impresion acotada ademas a UNA carrera (sigue la FK: ticket.estudiante.carrera) ---
+    long countByCategoriaAndEstudianteCarreraAndImpresoAndEstado(
+            CategoriaTicket categoria, String carrera, boolean impreso, EstadoRegistro estado);
+
+    List<Ticket> findAllByCategoriaAndEstudianteCarreraAndImpresoFalseAndEstadoOrderByIdTicketAsc(
+            CategoriaTicket categoria, String carrera, EstadoRegistro estado);
+
+    List<Ticket> findAllByCategoriaAndEstudianteCarreraAndEstadoOrderByIdTicketAsc(
+            CategoriaTicket categoria, String carrera, EstadoRegistro estado);
+
     // --- Monitoreo en tiempo real ---
     List<Ticket> findAllByDentroTrueAndEstado(EstadoRegistro estado);
 

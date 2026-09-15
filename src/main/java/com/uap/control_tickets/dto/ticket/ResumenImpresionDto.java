@@ -23,6 +23,9 @@ public class ResumenImpresionDto {
     /** Categoria de esta tirada (ESTUDIANTE, ADMINISTRATIVO, EXTERNO). */
     private String categoria;
 
+    /** Carrera a la que se acotaron los conteos; null = todas las carreras. */
+    private String carrera;
+
     /**
      * true = ya existe la plantilla de arte para esta categoria y se puede generar el
      * pliego. Por ahora solo ESTUDIANTE la tiene; las demas cuentan tickets pero aun

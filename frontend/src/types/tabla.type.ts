@@ -13,6 +13,11 @@ export interface ColumnaTabla {
    * Por defecto TODAS las columnas se buscan.
    */
   buscable?: boolean
+  /**
+   * Si es false, el encabezado no ordena al hacerle clic.
+   * Por defecto TODAS las columnas se pueden ordenar.
+   */
+  ordenable?: boolean
 }
 
 /** Cualquier objeto que se pueda mostrar como fila. */

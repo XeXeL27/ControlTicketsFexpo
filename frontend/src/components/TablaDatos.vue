@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends FilaTabla">
-// Tabla reutilizable: buscador + paginacion + estados de carga/vacio.
+// Tabla reutilizable: buscador + orden por columna + paginacion + estados de carga/vacio.
 //
 // Para usarla se le pasan las columnas y las filas; lo demas lo resuelve sola.
 // Si una celda necesita pintarse distinto (un chip, un color, botones), se usa
@@ -14,8 +14,13 @@
 //       <button @click="editar(fila)">Editar</button>
 //     </template>
 //   </TablaDatos>
+//
+// Orden: clic en un encabezado → A→Z, otro clic → Z→A, otro → orden original.
+// Si la vista necesita saber el orden elegido (Impresión lo manda al pliego), lo
+// lee con v-model:orden y lo aplica con la MISMA función, ordenarFilas().
 import { computed, ref, watch } from 'vue'
 import type { ColumnaTabla, FilaTabla } from '@/types/tabla.type'
+import { ordenarFilas, type OrdenTabla } from '@/utils/orden'
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +39,8 @@ const props = withDefaults(
     textoVacio?: string
     /** Si hay columna de acciones (agrega el encabezado y la celda del slot). */
     conAcciones?: boolean
+    /** Permite ordenar haciendo clic en los encabezados (cada columna puede negarse). */
+    ordenable?: boolean
   }>(),
   {
     cargando: false,
@@ -42,8 +49,12 @@ const props = withDefaults(
     porPagina: 10,
     textoVacio: 'Sin registros.',
     conAcciones: true,
+    ordenable: true,
   },
 )
+
+/** Orden elegido (columna + dirección). null = el orden en que llegan las filas. */
+const orden = defineModel<OrdenTabla | null>('orden', { default: null })
 
 const busqueda = ref('')
 const pagina = ref(1)
@@ -94,12 +105,35 @@ const totalPaginas = computed(() => {
   return Math.max(1, Math.ceil(filasFiltradas.value.length / filasPorPagina.value))
 })
 
+/** Filas que pasan el buscador, ya ordenadas por la columna elegida. */
+const filasOrdenadas = computed(() => ordenarFilas(filasFiltradas.value, orden.value))
+
 /** Las filas de la pagina actual. */
 const filasPagina = computed(() => {
-  if (!filasPorPagina.value) return filasFiltradas.value
+  if (!filasPorPagina.value) return filasOrdenadas.value
   const desde = (pagina.value - 1) * filasPorPagina.value
-  return filasFiltradas.value.slice(desde, desde + filasPorPagina.value)
+  return filasOrdenadas.value.slice(desde, desde + filasPorPagina.value)
 })
+
+/** Una columna se puede ordenar salvo que la tabla o la columna digan que no. */
+function esOrdenable(c: ColumnaTabla) {
+  return props.ordenable && c.ordenable !== false
+}
+
+/** Clic en el encabezado: A→Z, después Z→A, después vuelve al orden original. */
+function alternarOrden(c: ColumnaTabla) {
+  if (!esOrdenable(c)) return
+  if (orden.value?.clave !== c.clave) orden.value = { clave: c.clave, direccion: 'asc' }
+  else if (orden.value.direccion === 'asc') orden.value = { clave: c.clave, direccion: 'desc' }
+  else orden.value = null
+  pagina.value = 1
+}
+
+/** Flechita del encabezado: ▲ A→Z, ▼ Z→A, ↕ (tenue) si no es la columna activa. */
+function flecha(c: ColumnaTabla) {
+  if (orden.value?.clave !== c.clave) return '↕'
+  return orden.value.direccion === 'asc' ? '▲' : '▼'
+}
 
 // Al filtrar (o al cambiar los datos) la pagina actual puede quedar fuera de rango.
 watch([filasFiltradas, totalPaginas], () => {
@@ -149,8 +183,15 @@ const rango = computed(() => {
               v-for="c in columnas"
               :key="c.clave"
               :style="c.ancho ? { width: c.ancho } : undefined"
+              :class="{ ordenable: esOrdenable(c), ordenada: orden?.clave === c.clave }"
+              :title="esOrdenable(c) ? `Ordenar por ${c.titulo}` : undefined"
+              :tabindex="esOrdenable(c) ? 0 : undefined"
+              :aria-sort="orden?.clave === c.clave ? (orden.direccion === 'asc' ? 'ascending' : 'descending') : undefined"
+              @click="alternarOrden(c)"
+              @keydown.enter="alternarOrden(c)"
             >
               {{ c.titulo }}
+              <span v-if="esOrdenable(c)" class="flecha">{{ flecha(c) }}</span>
             </th>
             <th v-if="conAcciones">Acciones</th>
           </tr>
@@ -221,4 +262,11 @@ const rango = computed(() => {
   margin-top: 12px;
 }
 .tabla-rango { color: var(--texto-suave); font-size: 13px; }
+
+/* Encabezados que ordenan al hacer clic */
+th.ordenable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.ordenable:hover { color: var(--texto); }
+th.ordenada { color: var(--azul); }
+.flecha { font-size: 10px; margin-left: 4px; opacity: .4; }
+th.ordenada .flecha { opacity: 1; }
 </style>

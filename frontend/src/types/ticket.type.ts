@@ -41,6 +41,8 @@ export type CategoriaTicket = 'ESTUDIANTE' | 'ADMINISTRATIVO' | 'EXTERNO'
 /** Refleja ResumenImpresionDto (acotado a una categoría). */
 export interface ResumenImpresionDto {
   categoria: CategoriaTicket
+  /** Carrera a la que se acotaron los conteos; null = todas. */
+  carrera?: string | null
   /** true = ya hay plantilla de arte para esta categoría y se puede generar el pliego. */
   plantillaDisponible: boolean
   total: number

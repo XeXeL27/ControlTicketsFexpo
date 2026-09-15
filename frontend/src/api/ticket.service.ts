@@ -52,31 +52,41 @@ export function emitirTicketsMasivo(idsEstudiante?: number[]) {
 
 // --- Impresion por tandas ---
 
+// En resumen y pliego, `carrera` es opcional: sin ella (o vacía) cuentan todas.
+// Axios no manda los params que valen undefined, por eso el `|| undefined`.
 export function resumenImpresion(
   formato: FormatoPliego = 'MIXTO_8',
   categoria: CategoriaTicket = 'ESTUDIANTE',
+  carrera?: string,
 ) {
   return http
-    .get<ResumenImpresionDto>('/tickets/impresion/resumen', { params: { formato, categoria } })
+    .get<ResumenImpresionDto>('/tickets/impresion/resumen', {
+      params: { formato, categoria, carrera: carrera || undefined },
+    })
     .then((r) => r.data)
 }
 
 /**
- * Genera el PDF del pliego de UNA categoría. Por defecto toma solo los pendientes y
- * los deja marcados como impresos, para que la próxima tanda siga donde quedó esta.
+ * Genera el PDF del pliego de UNA categoría (y de una carrera, si se indica). Por
+ * defecto toma solo los pendientes y los deja marcados como impresos, para que la
+ * próxima tanda siga donde quedó esta.
  */
 export function generarPliego(opciones: {
   formato: FormatoPliego
   categoria: CategoriaTicket
+  carrera?: string
   cantidad?: number
   soloPendientes?: boolean
   marcar?: boolean
+  /** Ids de ticket en el orden en que deben salir (el de la tabla). Va en el cuerpo. */
+  orden?: number[]
 }) {
   return http
-    .post('/tickets/impresion/pliego', null, {
+    .post('/tickets/impresion/pliego', opciones.orden?.length ? opciones.orden : null, {
       params: {
         formato: opciones.formato,
         categoria: opciones.categoria,
+        carrera: opciones.carrera || undefined,
         cantidad: opciones.cantidad,
         soloPendientes: opciones.soloPendientes ?? true,
         marcar: opciones.marcar ?? true,

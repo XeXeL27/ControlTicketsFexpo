@@ -34,20 +34,27 @@ public interface TicketService {
 
     // --- Impresion por tandas (cada categoria se imprime por separado) ---
 
-    /** Estado de impresion (impresos/pendientes/hojas) ACOTADO a una categoria. */
-    ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria);
+    /**
+     * Estado de impresion (impresos/pendientes/hojas) ACOTADO a una categoria y,
+     * si se indica, a una carrera (solo aplica a ESTUDIANTE; null o vacio = todas).
+     */
+    ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria, String carrera);
 
     /**
      * Arma el PDF del proximo pliego de UNA categoria, acomodando los tickets en hojas oficio.
      *
      * @param formato   disposicion y medidas del ticket en la hoja.
      * @param categoria que tickets imprimir (solo se mezclan tickets de la misma categoria).
+     * @param carrera   solo los estudiantes de esta carrera; null o vacio = todas.
      * @param cantidad  cuantos tickets incluir; null o <=0 = todos los pendientes.
      * @param soloPendientes true = toma solo los que nunca se imprimieron.
      * @param marcar    true = los deja marcados como impresos (para no repetirlos).
+     * @param orden     ids de ticket en el orden en que deben salir (el de la tabla del
+     *                  frontend); null o vacio = orden de emision. Solo cambia la POSICION
+     *                  de cada ticket, no cuales entran.
      */
-    byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, Integer cantidad,
-                         boolean soloPendientes, boolean marcar);
+    byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, String carrera,
+                         Integer cantidad, boolean soloPendientes, boolean marcar, List<Long> orden);
 
     /** Marca o desmarca un ticket como impreso (por si hubo que reimprimir uno). */
     void marcarImpreso(Long idTicket, boolean impreso);

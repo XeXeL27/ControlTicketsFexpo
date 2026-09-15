@@ -24,7 +24,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -152,14 +156,33 @@ public class TicketServiceImpl implements TicketService {
         return categoria == CategoriaTicket.ESTUDIANTE;
     }
 
+    /**
+     * Normaliza el filtro de carrera: devuelve null (= todas) si no vino, si vino vacio
+     * o si la categoria no es ESTUDIANTE (solo los estudiantes tienen carrera).
+     * No se recorta ni se pasa a minusculas: el frontend manda el valor tal cual esta
+     * guardado, y la consulta lo compara exacto.
+     */
+    private static String filtroCarrera(CategoriaTicket categoria, String carrera) {
+        if (categoria != CategoriaTicket.ESTUDIANTE || carrera == null || carrera.isBlank()) {
+            return null;
+        }
+        return carrera;
+    }
+
     @Override
     @Transactional(readOnly = true)
-    public ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria) {
-        long impresos = ticketDao.countByCategoriaAndImpresoAndEstado(categoria, true, EstadoRegistro.ACTIVO);
-        long pendientes = ticketDao.countByCategoriaAndImpresoAndEstado(categoria, false, EstadoRegistro.ACTIVO);
+    public ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria, String carrera) {
+        String c = filtroCarrera(categoria, carrera);
+        long impresos = c == null
+                ? ticketDao.countByCategoriaAndImpresoAndEstado(categoria, true, EstadoRegistro.ACTIVO)
+                : ticketDao.countByCategoriaAndEstudianteCarreraAndImpresoAndEstado(categoria, c, true, EstadoRegistro.ACTIVO);
+        long pendientes = c == null
+                ? ticketDao.countByCategoriaAndImpresoAndEstado(categoria, false, EstadoRegistro.ACTIVO)
+                : ticketDao.countByCategoriaAndEstudianteCarreraAndImpresoAndEstado(categoria, c, false, EstadoRegistro.ACTIVO);
 
         ResumenImpresionDto r = new ResumenImpresionDto();
         r.setCategoria(categoria.name());
+        r.setCarrera(c);
         r.setPlantillaDisponible(plantillaDisponible(categoria));
         r.setTotal(impresos + pendientes);
         r.setImpresos(impresos);
@@ -173,25 +196,68 @@ public class TicketServiceImpl implements TicketService {
         return r;
     }
 
+    /**
+     * Reordena los tickets segun la lista de ids que manda el frontend (el orden en que
+     * se ven en la tabla). El orden solo cambia la POSICION en el pliego: que tickets
+     * entran lo sigue decidiendo el backend (pendientes, carrera). Los que no vengan en
+     * la lista van al final, por idTicket.
+     */
+    private static List<Ticket> ordenarSegun(List<Ticket> tickets, List<Long> orden) {
+        if (orden == null || orden.isEmpty()) {
+            return tickets;
+        }
+        Map<Long, Integer> posicion = new HashMap<>();
+        for (int i = 0; i < orden.size(); i++) {
+            posicion.putIfAbsent(orden.get(i), i);
+        }
+        List<Ticket> ordenados = new ArrayList<>(tickets);
+        ordenados.sort(Comparator
+                .comparing((Ticket t) -> posicion.getOrDefault(t.getIdTicket(), Integer.MAX_VALUE))
+                .thenComparing(Ticket::getIdTicket));
+        return ordenados;
+    }
+
+    /**
+     * Tickets que pueden ir al pliego, en orden de emision.
+     * carrera == null → toda la categoria; si no, solo los estudiantes de esa carrera.
+     */
+    private List<Ticket> candidatosPliego(CategoriaTicket categoria, String carrera, boolean soloPendientes) {
+        if (carrera == null) {
+            return soloPendientes
+                    ? ticketDao.findAllByCategoriaAndImpresoFalseAndEstadoOrderByIdTicketAsc(categoria, EstadoRegistro.ACTIVO)
+                    : ticketDao.findAllByCategoriaAndEstado(categoria, EstadoRegistro.ACTIVO);
+        }
+        return soloPendientes
+                ? ticketDao.findAllByCategoriaAndEstudianteCarreraAndImpresoFalseAndEstadoOrderByIdTicketAsc(
+                        categoria, carrera, EstadoRegistro.ACTIVO)
+                : ticketDao.findAllByCategoriaAndEstudianteCarreraAndEstadoOrderByIdTicketAsc(
+                        categoria, carrera, EstadoRegistro.ACTIVO);
+    }
+
     @Override
     @Transactional
-    public byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, Integer cantidad,
-                                boolean soloPendientes, boolean marcar) {
+    public byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, String carrera,
+                                Integer cantidad, boolean soloPendientes, boolean marcar,
+                                List<Long> orden) {
         if (!plantillaDisponible(categoria)) {
             throw new NegocioException(
                     "La plantilla de arte de " + categoria + " todavia no esta cargada; "
                             + "por ahora solo se puede imprimir la categoria ESTUDIANTE.");
         }
 
-        List<Ticket> candidatos = soloPendientes
-                ? ticketDao.findAllByCategoriaAndImpresoFalseAndEstadoOrderByIdTicketAsc(categoria, EstadoRegistro.ACTIVO)
-                : ticketDao.findAllByCategoriaAndEstado(categoria, EstadoRegistro.ACTIVO);
+        String c = filtroCarrera(categoria, carrera);
+        List<Ticket> candidatos = candidatosPliego(categoria, c, soloPendientes);
 
         if (candidatos.isEmpty()) {
+            String donde = c == null ? "esta categoria" : "la carrera \"" + c + "\"";
             throw new NegocioException(soloPendientes
-                    ? "No quedan tickets pendientes de imprimir en esta categoria"
-                    : "No hay tickets emitidos en esta categoria");
+                    ? "No quedan tickets pendientes de imprimir en " + donde
+                    : "No hay tickets emitidos en " + donde);
         }
+        // Primero se ordenan como se ven en la tabla (si vino el orden) y DESPUES se
+        // recorta la tanda: asi una tanda de N toma los primeros N de la lista.
+        candidatos = ordenarSegun(candidatos, orden);
+
         // Se recorta a la cantidad pedida para poder imprimir de a tandas.
         if (cantidad != null && cantidad > 0 && cantidad < candidatos.size()) {
             candidatos = candidatos.subList(0, cantidad);

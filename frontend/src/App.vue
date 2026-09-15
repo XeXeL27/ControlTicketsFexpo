@@ -55,17 +55,28 @@ function cerrarSesion(): void {
 </template>
 
 <style scoped>
+/*
+ * El layout ocupa exactamente la altura de la ventana y NO scrollea la pagina:
+ * la barra superior y el menu lateral quedan fijos, y el unico que tiene scroll
+ * es el contenido (<main class="contenido">). Asi, al bajar por una tabla larga,
+ * el menu y la barra siguen a la vista.
+ */
+.layout { height: 100vh; display: flex; flex-direction: column; }
 .topbar {
+  flex-shrink: 0;
   display: flex; justify-content: space-between; align-items: center;
   background: #fff; color: var(--texto); padding: 10px 20px;
   border-bottom: 1px solid var(--borde); box-shadow: var(--sombra);
+  position: relative; z-index: 1; /* la sombra se dibuja sobre el contenido */
 }
 .logo-top { height: 30px; width: auto; }
 .usuario { color: var(--texto-suave); font-size: 14px; }
-.cuerpo { display: flex; min-height: calc(100vh - 51px); }
+/* min-height: 0 hace falta para que el hijo flex pueda scrollear en vez de estirarse. */
+.cuerpo { flex: 1; display: flex; min-height: 0; }
 .menu {
-  width: 210px; background: #fff; border-right: 1px solid var(--borde);
+  width: 210px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--borde);
   display: flex; flex-direction: column; padding: 14px;
+  overflow-y: auto; /* por si la ventana es muy baja para todo el menu */
 }
 .menu a {
   padding: 10px 14px; border-radius: 8px; text-decoration: none;
@@ -73,5 +84,5 @@ function cerrarSesion(): void {
 }
 .menu a:hover { background: #f1f5f9; }
 .menu a.router-link-exact-active { background: var(--azul); color: #fff; }
-.contenido { flex: 1; padding: 26px; }
+.contenido { flex: 1; min-width: 0; padding: 26px; overflow-y: auto; }
 </style>

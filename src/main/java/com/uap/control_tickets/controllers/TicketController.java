@@ -69,25 +69,31 @@ public class TicketController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/impresion/resumen")
-    @Operation(summary = "Estado de impresion de UNA categoria: impresos, pendientes y hojas")
+    @Operation(summary = "Estado de impresion de UNA categoria: impresos, pendientes y hojas",
+            description = "carrera (opcional, solo ESTUDIANTE) acota los conteos a esa carrera")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ResumenImpresionDto> resumenImpresion(
             @RequestParam(defaultValue = "MIXTO_8") FormatoPliego formato,
-            @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria) {
-        return ResponseEntity.ok(ticketService.resumenImpresion(formato, categoria));
+            @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria,
+            @RequestParam(required = false) String carrera) {
+        return ResponseEntity.ok(ticketService.resumenImpresion(formato, categoria, carrera));
     }
 
     @PostMapping(value = "/impresion/pliego", produces = MediaType.APPLICATION_PDF_VALUE)
     @Operation(summary = "Genera el PDF del pliego de una categoria (hojas oficio con varios "
-            + "tickets) y por defecto marca esos tickets como impresos")
+            + "tickets) y por defecto marca esos tickets como impresos",
+            description = "carrera (opcional, solo ESTUDIANTE) = solo los tickets de esa carrera. "
+                    + "Cuerpo opcional: ids de ticket en el orden en que deben salir (el de la tabla).")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> generarPliego(
             @RequestParam(defaultValue = "MIXTO_8") FormatoPliego formato,
             @RequestParam(defaultValue = "ESTUDIANTE") CategoriaTicket categoria,
+            @RequestParam(required = false) String carrera,
             @RequestParam(required = false) Integer cantidad,
             @RequestParam(defaultValue = "true") boolean soloPendientes,
-            @RequestParam(defaultValue = "true") boolean marcar) {
-        byte[] pdf = ticketService.generarPliego(formato, categoria, cantidad, soloPendientes, marcar);
+            @RequestParam(defaultValue = "true") boolean marcar,
+            @RequestBody(required = false) List<Long> orden) {
+        byte[] pdf = ticketService.generarPliego(formato, categoria, carrera, cantidad, soloPendientes, marcar, orden);
         return ResponseEntity.ok()
                 .header("Content-Disposition",
                         "attachment; filename=pliego-" + categoria.name().toLowerCase() + ".pdf")
