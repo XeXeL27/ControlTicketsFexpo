@@ -1,0 +1,36 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### VS Code ###
+.vscode/
+
+### Perfiles locales con credenciales (NO subir) ###
+src/main/resources/application-jarv.properties
+src/main/resources/application-*.properties
+!src/main/resources/application.properties
+
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+### Artefactos de build del frontend ###
+frontend/*.tsbuildinfo

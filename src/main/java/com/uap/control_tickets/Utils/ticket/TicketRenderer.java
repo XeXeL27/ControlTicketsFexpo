@@ -1,0 +1,354 @@
+package com.uap.control_tickets.Utils.ticket;
+
+import org.openpdf.text.Document;
+import org.openpdf.text.Image;
+import org.openpdf.text.Rectangle;
+import org.openpdf.text.pdf.PdfContentByte;
+import org.openpdf.text.pdf.PdfWriter;
+import com.uap.control_tickets.Utils.qr.QrGenerator;
+import com.uap.control_tickets.enums.FormatoPliego;
+import com.uap.control_tickets.exception.NegocioException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
+
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.List;
+
+/**
+ * Rellena la plantilla del ticket de estudiante con los datos + el QR y la
+ * exporta a PNG o PDF.
+ *
+ * Como funciona:
+ *  1) Carga la plantilla en blanco desde resources/plantillas/.
+ *  2) Dibuja encima cada dato, centrado dentro de su recuadro (coordenadas
+ *     detectadas sobre la imagen 2524x839).
+ *  3) Incrusta el QR (generado con ZXing) en su recuadro.
+ *
+ * Las coordenadas son [x, y, ancho, alto] en pixeles de la plantilla original.
+ */
+@Component
+@RequiredArgsConstructor
+public class TicketRenderer {
+
+    private final QrGenerator qrGenerator;
+
+    private static final String PLANTILLA_ESTUDIANTE = "plantillas/ticket-estudiante-plantilla.png";
+
+    // Recuadros de la plantilla de estudiante (x, y, ancho, alto)
+    private static final int[] CAJA_CARRERA = {520, 64, 704, 68};
+    private static final int[] CAJA_CODIGO  = {2144, 64, 312, 68};
+    // Mismo código, repetido en el talón izquierdo (recuadro vertical).
+    // Interior exacto del recuadro impreso en el talón: sus bordes están en
+    // x=342 y x=415, y=27 y y=382 (medido sobre la plantilla en blanco).
+    private static final int[] CAJA_CODIGO_TALON = {343, 28, 72, 354};
+    private static final int[] CAJA_NOMBRE  = {1252, 148, 1208, 68};
+    private static final int[] CAJA_RU      = {856, 160, 348, 52};
+    private static final int[] CAJA_QR      = {1344, 420, 264, 260};
+
+    // -------------------------------------------------------------------------
+    // API publica
+    // -------------------------------------------------------------------------
+
+    /** Ticket de estudiante como imagen (para previsualizar o incrustar). */
+    public BufferedImage renderEstudiante(DatosTicketEstudiante datos) {
+        BufferedImage base = cargarPlantilla(PLANTILLA_ESTUDIANTE);
+        BufferedImage lienzo = new BufferedImage(
+                base.getWidth(), base.getHeight(), BufferedImage.TYPE_INT_RGB);
+
+        Graphics2D g = lienzo.createGraphics();
+        activarCalidad(g);
+        g.drawImage(base, 0, 0, null);
+
+        // Textos (negro, negrita, centrados y auto-ajustados a su recuadro)
+        dibujarCentrado(g, mayus(datos.carrera()),        CAJA_CARRERA, 40);
+        dibujarCentrado(g, mayus(datos.codigo()),         CAJA_CODIGO,  34);
+        dibujarCentrado(g, mayus(datos.nombreCompleto()), CAJA_NOMBRE,  44);
+        dibujarCentrado(g, datos.ru(),                    CAJA_RU,      40);
+        // El mismo código, en el talón izquierdo (texto vertical).
+        dibujarVertical(g, mayus(datos.codigo()),         CAJA_CODIGO_TALON, 40);
+
+        // QR
+        int lado = Math.min(CAJA_QR[2], CAJA_QR[3]);
+        BufferedImage qr = qrGenerator.generarImagen(datos.qrContenido(), lado);
+        int qrX = CAJA_QR[0] + (CAJA_QR[2] - lado) / 2;
+        int qrY = CAJA_QR[1] + (CAJA_QR[3] - lado) / 2;
+        g.setColor(Color.WHITE);
+        g.fillRect(qrX, qrY, lado, lado); // fondo blanco por si acaso
+        g.drawImage(qr, qrX, qrY, lado, lado, null);
+
+        g.dispose();
+        return lienzo;
+    }
+
+    /** Ticket de estudiante como PNG. */
+    public byte[] pngEstudiante(DatosTicketEstudiante datos) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            ImageIO.write(renderEstudiante(datos), "PNG", out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo generar el PNG del ticket: " + e.getMessage());
+        }
+    }
+
+    /** Ticket de estudiante como PDF (una pagina del tamano exacto del ticket). */
+    public byte[] pdfEstudiante(DatosTicketEstudiante datos) {
+        byte[] png = pngEstudiante(datos);
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Image imagen = Image.getInstance(png);
+            Rectangle pagina = new Rectangle(imagen.getWidth(), imagen.getHeight());
+            Document doc = new Document(pagina, 0, 0, 0, 0);
+            PdfWriter.getInstance(doc, out);
+            doc.open();
+            imagen.setAbsolutePosition(0, 0);
+            doc.add(imagen);
+            doc.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo generar el PDF del ticket: " + e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Pliego de impresion (varios tickets por hoja)
+    // -------------------------------------------------------------------------
+
+    /** Hoja OFICIO en vertical, en centimetros. */
+    private static final double HOJA_ANCHO_CM = 21.5;
+    private static final double HOJA_ALTO_CM = 33.0;
+    /** Margen de la hoja y separacion entre tickets, para que la imprenta pueda cortar. */
+    private static final double MARGEN_CM = 0.3;
+    private static final double SEPARACION_CM = 0.2;
+
+    /** 1 cm = 28.3465 puntos PostScript (72 puntos por pulgada). */
+    private static final double PUNTOS_POR_CM = 72.0 / 2.54;
+
+    /**
+     * Resolucion de impresion. 300 DPI es el estandar de imprenta; por encima de eso
+     * el ojo no distingue y el archivo crece sin sentido.
+     */
+    private static final int DPI_IMPRESION = 300;
+
+    /**
+     * Calidad JPEG de los tickets dentro del pliego.
+     *
+     * El arte es una FOTO (degradados, caras), que en PNG no comprime casi nada: cada
+     * ticket crudo pesa 6 MB y una hoja de 8 se iba a 22 MB, o sea medio giga para
+     * todo el evento. En JPEG 0.9 la diferencia visual es imperceptible en papel y el
+     * archivo queda en un tamano que se puede mandar por correo a la imprenta.
+     */
+    private static final float CALIDAD_JPEG = 0.9f;
+
+    private static float pt(double cm) {
+        return (float) (cm * PUNTOS_POR_CM);
+    }
+
+    /**
+     * Arma el PDF con varios tickets acomodados en hojas OFICIO, listo para imprenta.
+     *
+     * Reparte los tickets en hojas de {@code formato.getPorHoja()}. En cada hoja
+     * primero se llenan las posiciones horizontales (apiladas, de arriba hacia
+     * abajo) y despues las verticales de la columna lateral, rotadas 90 grados.
+     *
+     * El PDF se arma en PUNTOS (unidad real de PostScript), no en pixeles, para que
+     * el ticket salga impreso exactamente del tamano fisico que pide la imprenta.
+     */
+    public byte[] pdfPliegoEstudiantes(List<DatosTicketEstudiante> tickets, FormatoPliego formato) {
+        if (tickets == null || tickets.isEmpty()) {
+            throw new NegocioException("No hay tickets para armar el pliego");
+        }
+        Rectangle hoja = new Rectangle(pt(HOJA_ANCHO_CM), pt(HOJA_ALTO_CM));
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Document doc = new Document(hoja, 0, 0, 0, 0);
+            PdfWriter writer = PdfWriter.getInstance(doc, out);
+            doc.open();
+            PdfContentByte lienzo = writer.getDirectContent();
+
+            int porHoja = formato.getPorHoja();
+            for (int i = 0; i < tickets.size(); i++) {
+                int posicion = i % porHoja;
+                if (i > 0 && posicion == 0) doc.newPage();
+                colocar(lienzo, tickets.get(i), formato, posicion);
+            }
+            doc.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo generar el pliego: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Dibuja un ticket en la posicion que le toca dentro de la hoja.
+     *
+     * El sistema de coordenadas del PDF tiene el origen ABAJO a la izquierda, por eso
+     * las filas horizontales se cuentan restando desde el borde superior.
+     */
+    private void colocar(PdfContentByte lienzo, DatosTicketEstudiante datos,
+                         FormatoPliego formato, int posicion) throws Exception {
+        Image img = Image.getInstance(jpegParaImpresion(datos, formato));
+        float largo = pt(formato.getLargoCm());
+        float alto = pt(formato.getAltoCm());
+        float margen = pt(MARGEN_CM);
+        float sep = pt(SEPARACION_CM);
+        float topeSuperior = pt(HOJA_ALTO_CM) - margen;
+
+        if (posicion < formato.getHorizontales()) {
+            // Fila horizontal: apiladas desde arriba hacia abajo.
+            float x = margen;
+            float y = topeSuperior - (posicion + 1) * alto - posicion * sep;
+            img.scaleAbsolute(largo, alto);
+            img.setAbsolutePosition(x, y);
+            lienzo.addImage(img);
+        } else {
+            // Columna lateral: el ticket va rotado 90 grados (queda "de pie").
+            int idx = posicion - formato.getHorizontales();
+            // Rotado, ocupa 'alto' de ancho y 'largo' de altura.
+            float x = margen + largo + sep;
+            float y = topeSuperior - (idx + 1) * largo - idx * sep;
+            // Matriz [a b c d e f]: mapea el cuadrado unitario de la imagen.
+            // Girado 90 grados antihorario, el eje ANCHO de la imagen (largo) apunta
+            // hacia ARRIBA y el eje ALTO (alto) hacia la IZQUIERDA:
+            //   a=0, b=largo  -> el ancho de la imagen sube 'largo'
+            //   c=-alto, d=0  -> el alto de la imagen va 'alto' hacia la izquierda
+            // Por eso el origen se corre a x+alto: si no, el ticket cae fuera de la hoja.
+            lienzo.addImage(img, 0, largo, -alto, 0, x + alto, y);
+        }
+    }
+
+    /**
+     * Rinde el ticket y lo devuelve como JPEG ya escalado a la resolucion de impresion.
+     * Evita cargar el PDF con pixeles que la imprenta no va a usar.
+     */
+    private byte[] jpegParaImpresion(DatosTicketEstudiante datos, FormatoPliego formato) {
+        BufferedImage completa = renderEstudiante(datos);
+        int anchoDeseado = (int) Math.round(formato.getLargoCm() / 2.54 * DPI_IMPRESION);
+        BufferedImage aUsar = anchoDeseado < completa.getWidth()
+                ? escalar(completa, anchoDeseado)
+                : completa;
+        return aJpeg(aUsar);
+    }
+
+    /** Reduce la imagen manteniendo la proporcion, con interpolacion suave. */
+    private BufferedImage escalar(BufferedImage origen, int anchoNuevo) {
+        int altoNuevo = Math.max(1,
+                Math.round(origen.getHeight() * (anchoNuevo / (float) origen.getWidth())));
+        BufferedImage destino = new BufferedImage(anchoNuevo, altoNuevo, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = destino.createGraphics();
+        activarCalidad(g);
+        g.drawImage(origen, 0, 0, anchoNuevo, altoNuevo, null);
+        g.dispose();
+        return destino;
+    }
+
+    /** Comprime a JPEG con la calidad configurada. */
+    private byte[] aJpeg(BufferedImage imagen) {
+        ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+             MemoryCacheImageOutputStream salida = new MemoryCacheImageOutputStream(out)) {
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(CALIDAD_JPEG);
+            writer.setOutput(salida);
+            writer.write(null, new IIOImage(imagen, null, null), param);
+            salida.flush();
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo comprimir el ticket: " + e.getMessage());
+        } finally {
+            writer.dispose();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private BufferedImage cargarPlantilla(String ruta) {
+        try (InputStream in = new ClassPathResource(ruta).getInputStream()) {
+            BufferedImage img = ImageIO.read(in);
+            if (img == null) throw new NegocioException("Plantilla no legible: " + ruta);
+            return img;
+        } catch (IOException e) {
+            throw new NegocioException("No se encontro la plantilla del ticket: " + ruta);
+        }
+    }
+
+    private void activarCalidad(Graphics2D g) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+    }
+
+    /** Dibuja el texto en negro, centrado dentro de la caja, reduciendo la fuente si no entra. */
+    private void dibujarCentrado(Graphics2D g, String texto, int[] caja, int tamMax) {
+        if (texto == null || texto.isBlank()) return;
+        int x = caja[0], y = caja[1], w = caja[2], h = caja[3];
+
+        Font fuente = ajustar(g, texto, w, h, tamMax);
+        g.setFont(fuente);
+        g.setColor(Color.BLACK);
+        FontMetrics fm = g.getFontMetrics();
+        int tx = x + (w - fm.stringWidth(texto)) / 2;
+        int ty = y + (h - fm.getHeight()) / 2 + fm.getAscent();
+        g.drawString(texto, tx, ty);
+    }
+
+    /** Dibuja el texto en negro, vertical (rotado, leyendo de abajo hacia arriba), centrado en la caja. */
+    private void dibujarVertical(Graphics2D g, String texto, int[] caja, int tamMax) {
+        if (texto == null || texto.isBlank()) return;
+        int x = caja[0], y = caja[1], w = caja[2], h = caja[3];
+
+        // Al rotar, el largo del texto ocupa el ALTO de la caja y su grosor el ANCHO.
+        Font fuente = ajustar(g, texto, h, w, tamMax);
+        java.awt.geom.AffineTransform previa = g.getTransform();
+        g.setColor(Color.BLACK);
+        g.setFont(fuente);
+
+        // Centrado sobre la TINTA real del texto, no sobre las metricas de la fuente:
+        // ascent/descent reservan lugar para tildes y colas que "EST-000001" no usa,
+        // asi que centrar por metricas deja el texto corrido un par de pixeles.
+        java.awt.geom.Rectangle2D tinta = fuente
+                .createGlyphVector(g.getFontRenderContext(), texto)
+                .getVisualBounds();
+
+        g.translate(x + w / 2.0, y + h / 2.0);
+        g.rotate(-Math.PI / 2); // -90°: lee de abajo hacia arriba
+
+        // getVisualBounds() viene relativa al origen de la linea base: restarla
+        // deja el rectangulo de tinta clavado en el centro de la caja.
+        g.drawString(texto,
+                (float) (-tinta.getWidth() / 2 - tinta.getX()),
+                (float) (-tinta.getHeight() / 2 - tinta.getY()));
+        g.setTransform(previa);
+    }
+
+    /** Busca la fuente mas grande (<= tamMax) que quepa en el ancho/alto de la caja. */
+    private Font ajustar(Graphics2D g, String texto, int w, int h, int tamMax) {
+        for (int tam = tamMax; tam >= 12; tam -= 2) {
+            Font f = new Font(Font.SANS_SERIF, Font.BOLD, tam);
+            FontMetrics fm = g.getFontMetrics(f);
+            if (fm.stringWidth(texto) <= w * 0.92 && fm.getHeight() <= h) {
+                return f;
+            }
+        }
+        return new Font(Font.SANS_SERIF, Font.BOLD, 12);
+    }
+
+    private String mayus(String s) {
+        return s == null ? "" : s.trim().toUpperCase();
+    }
+}

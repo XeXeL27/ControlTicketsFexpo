@@ -1,0 +1,91 @@
+/* Estilos globales. Estetica tipo panel de administracion (inspirada en el
+   frontend de escuela-tecnica): fondo gris claro, tarjetas blancas, azul UAP. */
+:root {
+  --azul: #0f4c81;         /* azul institucional UAP */
+  --azul-osc: #0b3a63;
+  --azul-claro: #2e6da4;
+  --gris-fondo: #f3f5f9;
+  --borde: #e2e8f0;
+  --texto: #1f2937;
+  --texto-suave: #64748b;
+  --rojo: #dc2626;
+  --verde: #16a34a;
+  --sombra: 0 1px 3px rgba(15, 23, 42, .08), 0 1px 2px rgba(15, 23, 42, .06);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--gris-fondo);
+  color: var(--texto);
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  background: var(--azul);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background .15s ease;
+}
+button:hover { background: var(--azul-osc); }
+button.secundario { background: #eef2f7; color: var(--texto); }
+button.secundario:hover { background: #e2e8f0; }
+button.peligro { background: var(--rojo); }
+button.peligro:hover { background: #b91c1c; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+
+input, select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+input:focus, select:focus {
+  border-color: var(--azul-claro);
+  box-shadow: 0 0 0 3px rgba(46, 109, 164, .15);
+}
+
+label { display: block; font-size: 13px; margin: 10px 0 4px; font-weight: 600; color: #374151; }
+
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--borde); font-size: 14px; }
+th { background: #f8fafc; color: var(--texto-suave); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .03em; }
+tbody tr:hover { background: #f8fafc; }
+
+.card {
+  background: #fff;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 22px;
+  box-shadow: var(--sombra);
+}
+
+h2 { color: var(--texto); }
+
+.error { color: var(--rojo); font-size: 13px; margin-top: 8px; }
+.ok { color: var(--verde); font-size: 13px; margin-top: 8px; }
+
+.modal-fondo {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, .5);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.modal { background: #fff; border-radius: 12px; padding: 26px; width: 440px; max-width: 92vw; box-shadow: 0 20px 40px rgba(0,0,0,.2); }
+.modal h3 { margin-top: 0; }
+
+.fila { display: flex; gap: 10px; align-items: center; }
+.acciones { display: flex; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center;
+  background: #e0edf9; color: var(--azul); padding: 3px 10px;
+  border-radius: 20px; font-size: 12px; font-weight: 600; margin: 0 4px 4px 0;
+}
