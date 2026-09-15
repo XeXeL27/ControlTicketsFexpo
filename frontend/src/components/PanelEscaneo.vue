@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// Panel de escaneo DEDICADO: escaner de ENTRADA o de SALIDA.
+// Panel de escaneo DEDICADO: escaner de ENTRADA o de SALIDA que se abre
+// SOLO al pulsar su boton (para no pedir las dos camaras a la vez).
 //
-// Es una "torre" autónoma: camara + respaldo manual + validacion + tarjeta de
-// resultado. El backend decide el estado segun el tipoMovimiento que recibe:
-//   - ENTRADA estando dentro   -> 400 "ya esta dentro" (duplicado).
-//   - SALIDA estando fuera     -> 400 "no hay entrada" (duplicado).
-//   - ENTRADA no matriculado   -> 409 bloqueado (cuerpo = ValidacionTicketDto).
-// Al terminar cualquier escaneo emite `validado` para que la vista refresque
-// la lista de "personas dentro".
-import { ref } from 'vue'
+// - Sin abrir: muestra el boton "Iniciar escaneo de X" (emite `abrir`).
+// - Abierto: camara + respaldo manual + validacion + tarjeta de resultado;
+//   "Detener" vuelve al estado de boton (emite `cerrar`).
+// - El backend decide la validez segun el tipoMovimiento:
+//     ENTRADA estando dentro -> 400 "ya esta dentro" (duplicado).
+//     SALIDA estando fuera   -> 400 "no hay entrada" (duplicado).
+//     ENTRADA no matriculado -> 409 bloqueado (cuerpo = ValidacionTicketDto).
+// Al terminar cualquier escaneo emite `validado` para refrescar la lista.
+import { computed, ref } from 'vue'
 import axios from 'axios'
 import EscannerQr from '@/components/EscannerQr.vue'
 import Alerta from '@/components/Alerta.vue'
@@ -22,17 +24,21 @@ const props = defineProps<{
   tipo: TipoMovimiento
   /** Titulo del panel (ej: "Escaner de ENTRADA"). */
   titulo?: string
+  /** true = este panel tiene la camara abierta. El padre asegura solo uno. */
+  activo: boolean
 }>()
 
-const emit = defineEmits<{ validado: [] }>()
+const emit = defineEmits<{ validado: []; abrir: []; cerrar: [] }>()
 
 const alertas = useAlertas()
 
-const escaneando = ref(true)
 const procesando = ref(false)
 const resultado = ref<ValidacionTicketDto | null>(null)
 const errorValidacion = ref('')
 const manual = ref('')
+
+// La camara esta activa solo si el panel esta abierto y no esta validando.
+const escaneando = computed(() => props.activo && !procesando.value)
 
 // Antirrebote: el mismo codigo leido dos veces en <1.5s se ignora (un solo
 // escaneo fisico puede decodificarse varias veces seguidas).
@@ -60,8 +66,7 @@ function alEnviarManual(): void {
 async function procesar(codigo: string): Promise<void> {
   if (procesando.value) return
 
-  escaneando.value = false // pausa la camara mientras se valida
-  procesando.value = true
+  procesando.value = true // apaga la camara mientras se valida
   resultado.value = null
   errorValidacion.value = ''
 
@@ -70,7 +75,7 @@ async function procesar(codigo: string): Promise<void> {
     resultado.value = dto
     alertas.exito(`${props.tipo} registrada (${dto.codigoIdentificacion})`)
   } catch (e) {
-    // 409 = entrada bloqueada por SIGSE: el cuerpo es el ValidacionTicketDto.
+    // 409 = entrada bloqueada por la matricula: el cuerpo es el ValidacionTicketDto.
     if (axios.isAxiosError(e) && e.response?.status === 409) {
       resultado.value = e.response.data as ValidacionTicketDto
       alertas.error('Ingreso denegado')
@@ -83,7 +88,6 @@ async function procesar(codigo: string): Promise<void> {
     // Pequena pausa para que el portero vea el resultado y luego re-escanea.
     setTimeout(() => {
       procesando.value = false
-      escaneando.value = true
     }, 1500)
   }
 }
@@ -102,36 +106,48 @@ function formatearHora(iso?: string): string {
   <section class="card panel" :class="`panel--${tipo.toLowerCase()}`">
     <header class="cabecera">
       <h3>{{ titulo ?? `Escaner de ${tipo}` }}</h3>
-      <span class="sello" :class="`sello--${tipo.toLowerCase()}`">{{ tipo }}</span>
+      <span v-if="!activo" class="sello" :class="`sello--${tipo.toLowerCase()}`">{{ tipo }}</span>
+      <button v-else class="secundario detener" type="button" @click="emit('cerrar')">Detener</button>
     </header>
 
-    <EscannerQr :activo="escaneando" @codigo="alCodigoLeido" />
+    <!-- Sin abrir: el boton que inicia el escaner -->
+    <button
+      v-if="!activo"
+      type="button"
+      class="btn-escaneo"
+      :class="`btn--${tipo.toLowerCase()}`"
+      @click="emit('abrir')"
+    >
+      Iniciar escaneo de {{ tipo }}
+    </button>
 
-    <div class="manual">
-      <label>O escriba el codigo del ticket</label>
-      <div class="fila">
-        <input
-          v-model="manual"
-          type="text"
-          placeholder="qr_token del ticket"
-          :disabled="procesando"
-          @keyup.enter="alEnviarManual"
-        />
-        <button :disabled="procesando || !manual.trim()" @click="alEnviarManual">Validar</button>
+    <!-- Abierto: camara + respaldo manual -->
+    <template v-else>
+      <EscannerQr :activo="escaneando" @codigo="alCodigoLeido" />
+
+      <div class="manual">
+        <label>O escriba el codigo del ticket</label>
+        <div class="fila">
+          <input
+            v-model="manual"
+            type="text"
+            placeholder="qr_token del ticket"
+            :disabled="procesando"
+            @keyup.enter="alEnviarManual"
+          />
+          <button :disabled="procesando || !manual.trim()" @click="alEnviarManual">Validar</button>
+        </div>
       </div>
-    </div>
 
-    <p v-if="procesando" class="procesando">Validando...</p>
-    <Alerta v-if="errorValidacion" tipo="error" cerrable @cerrar="errorValidacion = ''">
-      {{ errorValidacion }}
-    </Alerta>
+      <p v-if="procesando" class="procesando">Validando...</p>
+      <Alerta v-if="errorValidacion" tipo="error" cerrable @cerrar="errorValidacion = ''">
+        {{ errorValidacion }}
+      </Alerta>
+    </template>
 
-    <!-- Tarjeta de resultado -->
+    <!-- Tarjeta de resultado (queda visible aunque se cierre el escaner) -->
     <div v-if="resultado" class="resultado-card">
-      <div
-        class="resultado"
-        :class="resultado.bloqueado ? 'rojo' : tipo === 'ENTRADA' ? 'verde' : 'azul'"
-      >
+      <div class="resultado" :class="resultado.bloqueado ? 'rojo' : tipo === 'ENTRADA' ? 'verde' : 'azul'">
         <span v-if="resultado.bloqueado" class="resultado-titulo">INGRESO DENEGADO</span>
         <span v-else class="resultado-titulo">{{ tipo }}</span>
         <span class="resultado-codigo">{{ resultado.codigoIdentificacion }}</span>
@@ -156,11 +172,11 @@ function formatearHora(iso?: string): string {
         </li>
       </ul>
 
-      <!-- Datos de SIGSE (solo estudiantes) -->
+      <!-- Datos de la matricula (solo estudiantes) -->
       <template v-if="resultado.categoria === 'ESTUDIANTE'">
         <div class="sigse">
           <div class="fila">
-            <strong>Matricula SIGSE:</strong>
+            <strong>Matricula:</strong>
             <span v-if="resultado.matriculado === true" class="chip verde">MATRICULADO</span>
             <span v-else-if="resultado.matriculado === false" class="chip rojo">NO MATRICULADO</span>
             <span v-else class="chip gris">SIN CONFIRMACION</span>
@@ -169,19 +185,17 @@ function formatearHora(iso?: string): string {
             <div class="fila"><span>Vigencia:</span><b>{{ resultado.sigse.data.vigencia }}</b></div>
             <div class="fila"><span>Gestion:</span><b>{{ resultado.sigse.data.gestion }}</b></div>
             <div class="fila"><span>Plan:</span><b>{{ resultado.sigse.data.plan }}</b></div>
-            <div class="fila"><span>Correo SIGSE:</span><b>{{ resultado.sigse.data.correo }}</b></div>
+            <div class="fila"><span>Correo:</span><b>{{ resultado.sigse.data.correo }}</b></div>
             <img
               v-if="resultado.sigse.data.url_imagen"
               :src="resultado.sigse.data.url_imagen"
-              alt="Foto SIGSE"
+              alt="Foto del estudiante"
               class="foto"
             />
           </template>
         </div>
       </template>
     </div>
-
-    <p v-else-if="!errorValidacion" class="vacio">Aun no se escaneo ningun ticket en {{ tipo.toLowerCase() }}.</p>
   </section>
 </template>
 
@@ -200,13 +214,28 @@ function formatearHora(iso?: string): string {
 }
 .sello--entrada { background: #dcfce7; color: #166534; }
 .sello--salida { background: #dbeafe; color: #1e40af; }
+.detener { padding: 6px 14px; font-size: 13px; }
+
+/* Boton que abre el escaner */
+.btn-escaneo {
+  width: 100%;
+  padding: 18px;
+  border-radius: 10px;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+.btn--entrada { background: var(--verde); }
+.btn--entrada:hover { background: #15803d; }
+.btn--salida { background: var(--azul); }
+.btn--salida:hover { background: var(--azul-osc); }
 
 .manual label { display: block; font-size: 13px; color: var(--texto-suave); margin-bottom: 6px; }
 .manual .fila { display: flex; gap: 8px; }
 .manual input { flex: 1; }
 
 .procesando { color: var(--texto-suave); font-size: 13px; }
-.vacio { color: var(--texto-suave); font-size: 14px; padding: 16px 0; text-align: center; border: 1px dashed var(--borde); border-radius: 8px; }
 
 /* Tarjeta del resultado */
 .resultado-card { margin-top: 2px; }

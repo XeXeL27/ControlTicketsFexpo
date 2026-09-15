@@ -4,7 +4,12 @@
 // responde 409 y el servicio lo convierte en la excepcion axios correspondiente;
 // la vista debe recoger el error.response.data como ValidacionTicketDto.
 import http from '@/api/http'
-import type { PersonaDentroDto, TipoMovimiento, ValidacionTicketDto } from '@/types/control.type'
+import type {
+  PersonaDentroDto,
+  RespuestaSigseDto,
+  TipoMovimiento,
+  ValidacionTicketDto,
+} from '@/types/control.type'
 
 /**
  * Valida el codigo escaneado (qr_token) con el escaner dedicado (tipoMovimiento).
@@ -12,7 +17,7 @@ import type { PersonaDentroDto, TipoMovimiento, ValidacionTicketDto } from '@/ty
  *  - el ticket no existe (404),
  *  - el movimiento no coincide con el estado: ENTRADA estando dentro / SALIDA
  *    estando fuera (400, cuerpo = { mensaje }),
- *  - el ingreso fue bloqueado por SIGSE (409, cuerpo = ValidacionTicketDto).
+ *  - el ingreso fue bloqueado por la matricula (409, cuerpo = ValidacionTicketDto).
  */
 export async function validarTicket(
   codigo: string,
@@ -25,5 +30,15 @@ export async function validarTicket(
 /** Personas que estan actualmente dentro del recinto. */
 export async function personasDentro(): Promise<PersonaDentroDto[]> {
   const res = await http.get<PersonaDentroDto[]>('/control/dentro')
+  return res.data
+}
+
+/**
+ * Consulta puntual de matricula por RU de un estudiante (sin tocar la BD).
+ * Devuelve SIEMPRE la respuesta completa de la consulta; el estado de la
+ * matricula viene en `data.estado_matriculacion` (true = matriculado).
+ */
+export async function consultarSigse(ru: number): Promise<RespuestaSigseDto> {
+  const res = await http.get<RespuestaSigseDto>(`/control/sigse/${ru}`)
   return res.data
 }

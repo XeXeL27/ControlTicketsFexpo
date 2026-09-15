@@ -1,5 +1,6 @@
 package com.uap.control_tickets.controllers.control;
 
+import com.uap.control_tickets.apivalidacaion.Dto.ApiResponseDto;
 import com.uap.control_tickets.dto.control.PersonaDentroDto;
 import com.uap.control_tickets.dto.control.ValidacionRequestDto;
 import com.uap.control_tickets.dto.control.ValidacionTicketDto;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,7 +27,7 @@ import java.util.List;
  * Ruta base: /api/control (el prefijo /api lo agrega WebConfig).
  *  - POST /validar: escanea el qr_token con el escaner dedicado (ENTRADA o
  *    SALIDA). Rechaza duplicados (entrar estando dentro / salir estando fuera)
- *    y, para estudiantes que entran, valida SIGSE (409 si no matriculado).
+ *    y, para estudiantes que entran, valida la matricula (409 si no matriculado).
  *  - GET /dentro: quienes estan actualmente dentro del recinto.
  */
 @RestController
@@ -40,7 +42,7 @@ public class ControlController {
     @Operation(summary = "Valida el qr_token escaneado y registra el movimiento del escaner",
             description = "Busca el ticket por qr_token en la BD local y registra la ENTRADA o "
                     + "SALIDA segun el escaner dedicado (tipoMovimiento). Rechaza intentos "
-                    + "duplicados con 400. Para estudiantes que entran consulta SIGSE: si no "
+                    + "duplicados con 400. Para estudiantes que entran valida la matricula: si no "
                     + "esta matriculado, el ingreso se bloquea (409).")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<ValidacionTicketDto> validar(@Valid @RequestBody ValidacionRequestDto request) {
@@ -54,5 +56,15 @@ public class ControlController {
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<List<PersonaDentroDto>> personasDentro() {
         return ResponseEntity.ok(controlService.personasDentro());
+    }
+
+    @GetMapping("/sigse/{ru}")
+    @Operation(summary = "Consulta de matricula por RU de un estudiante",
+            description = "Consulta puntual sin tocar la BD. Devuelve SIEMPRE los datos "
+                    + "completos del estudiante (con o sin matricula vigente) para que el front los "
+                    + "pinte de verde/rojo.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    public ResponseEntity<ApiResponseDto> consultarSigse(@PathVariable Integer ru) {
+        return ResponseEntity.ok(controlService.consultarSigse(ru));
     }
 }

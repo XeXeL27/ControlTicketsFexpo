@@ -32,12 +32,12 @@ import java.util.List;
  *  2. Determina internamente la categoria y los datos de la persona (BD local).
  *  3. Anti-clones: ENTRADA estando dentro, o SALIDA estando fuera, se rechazan
  *     con error de negocio (no se registra nada).
- *  4. Solo al ENTRAR un estudiante: consulta SIGSE con el RU; si no esta
+ *  4. Solo al ENTRAR un estudiante: valida la matricula con el RU; si no esta
  *     matriculado bloquea el ingreso (no persiste).
  *  5. Registra el movimiento (por el escaner dedicado) y actualiza el flag
  *     Ticket.dentro.
  *
- * Nada de lo que devuelve SIGSE se guarda en BD.
+ * Nada de lo que devuelve la consulta se guarda en BD.
  */
 @Slf4j
 @Service
@@ -76,7 +76,7 @@ public class ControlServiceImpl implements ControlService {
                     "La persona no se encuentra DENTRO del recinto (no hay ENTRADA registrada).");
         }
 
-        // SIGSE: solo estudiantes al ENTRAR. Determina si el ingreso esta permitido.
+        // Matricula: solo estudiantes al ENTRAR. Determina si el ingreso esta permitido.
         if (tipoMovimiento == TipoAcceso.ENTRADA
                 && ticket.getCategoria() == CategoriaTicket.ESTUDIANTE) {
             ApiResponseDto sigse = consultarSigse(dto.getRu());
@@ -87,7 +87,7 @@ public class ControlServiceImpl implements ControlService {
             // Entrada bloqueada si no se puede confirmar la matricula.
             if (Boolean.FALSE.equals(dto.getMatriculado())) {
                 dto.setBloqueado(true);
-                dto.setMensaje("Estudiante no matriculado (o sin confirmacion SIGSE). No se permite el ingreso.");
+                dto.setMensaje("Estudiante no matriculado (o sin confirmacion de matricula). No se permite el ingreso.");
                 return dto;
             }
         }
@@ -131,6 +131,26 @@ public class ControlServiceImpl implements ControlService {
         return lista;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ApiResponseDto consultarSigse(Integer ru) {
+        if (ru == null) {
+            throw new NegocioException("Indique el RU del estudiante");
+        }
+        try {
+            ApiResponseDto res = apiService.informacion(ru);
+            if (res == null) {
+                throw new NegocioException("El sistema de matricula no respondio a la consulta del RU " + ru);
+            }
+            return res;
+        } catch (NegocioException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error consultando la matricula para RU {}: {}", ru, e.getMessage());
+            throw new NegocioException("El sistema de matricula no responde: " + e.getMessage());
+        }
+    }
+
     // ---------------- helpers ----------------
 
     /** Carga nombre, CI y los datos propios segun la categoria (todo de BD local). */
@@ -154,16 +174,16 @@ public class ControlServiceImpl implements ControlService {
         return dto;
     }
 
-    /** Consulta SIGSE por RU. Devuelve null si la API no responde o el RU no es numerico. */
+    /** Consulta la matricula por RU. Devuelve null si la API no responde o el RU no es numerico. */
     private ApiResponseDto consultarSigse(String ru) {
         try {
             int ruInt = Integer.parseInt(ru == null ? "" : ru.trim());
             return apiService.informacion(ruInt);
         } catch (NumberFormatException e) {
-            log.warn("RU no numerico para SIGSE: {}", ru);
+            log.warn("RU no numerico para la consulta de matricula: {}", ru);
             return null;
         } catch (Exception e) {
-            log.error("Error consultando SIGSE para RU {}: {}", ru, e.getMessage());
+            log.error("Error consultando la matricula para RU {}: {}", ru, e.getMessage());
             return null;
         }
     }

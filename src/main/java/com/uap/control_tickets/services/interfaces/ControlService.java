@@ -1,5 +1,6 @@
 package com.uap.control_tickets.services.interfaces;
 
+import com.uap.control_tickets.apivalidacaion.Dto.ApiResponseDto;
 import com.uap.control_tickets.dto.control.PersonaDentroDto;
 import com.uap.control_tickets.dto.control.ValidacionTicketDto;
 import com.uap.control_tickets.enums.TipoAcceso;
@@ -8,9 +9,9 @@ import java.util.List;
 
 /**
  * Validador de acceso: escaneo del QR del ticket con escaner dedicado de
- * ENTRADA o SALIDA. Registra el movimiento, consulta SIGSE para estudiantes
- * (solo al entrar) y rechaza intentos duplicados (entrar estando dentro o
- * salir estando fuera). No guarda datos de SIGSE en BD.
+ * ENTRADA o SALIDA. Registra el movimiento, valida la matricula para
+ * estudiantes (solo al entrar) y rechaza intentos duplicados (entrar estando
+ * dentro o salir estando fuera). No guarda datos de la consulta en BD.
  */
 public interface ControlService {
 
@@ -26,4 +27,10 @@ public interface ControlService {
 
     /** Personas que estan actualmente dentro del recinto (dentro=true). */
     List<PersonaDentroDto> personasDentro();
+
+    /**
+     * Consulta puntual de matricula por RU (sin tocar la BD).
+     * Devuelve la respuesta completa (con o sin matricula).
+     */
+    ApiResponseDto consultarSigse(Integer ru);
 }

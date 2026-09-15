@@ -4,7 +4,7 @@ import type { CategoriaTicket } from '@/types/ticket.type'
 /** Escaner dedicado (coincide con TipoAcceso del backend). */
 export type TipoMovimiento = 'ENTRADA' | 'SALIDA'
 
-// --- Respuesta SIGSE (ApiResponseDto + EstudianteDto del backend) ---
+// --- Respuesta de matricula (ApiResponseDto + EstudianteDto del backend) ---
 
 export interface DatosSigseDto {
   vigencia?: string
@@ -63,7 +63,7 @@ export interface ValidacionTicketDto {
   carrera?: string
   facultad?: string
   codigoAdministrativo?: string
-  /** Respuesta de SIGSE (solo estudiantes). */
+  /** Respuesta de la consulta de matricula (solo estudiantes). */
   sigse?: RespuestaSigseDto | null
   /** Solo estudiantes: true/false segun estado_matriculacion. */
   matriculado?: boolean | null

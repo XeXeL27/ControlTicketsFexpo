@@ -10,7 +10,7 @@ import java.time.Instant;
  *
  * Reune: los datos del ticket y de su persona desde la BD local, el estado
  * dentro/fuera resultante, el ultimo movimiento registrado, y —solo si el
- * ticket es de estudiante— la respuesta de SIGSE (Datos EstudianteDto).
+ * ticket es de estudiante— la respuesta de la consulta de matricula.
  */
 @Data
 public class ValidacionTicketDto {
@@ -37,10 +37,10 @@ public class ValidacionTicketDto {
     private String facultad;
     private String codigoAdministrativo;
 
-    // SIGSE: solo para tickets de estudiante. null si no aplica o no respondio.
+    // Consulta de matricula: solo para tickets de estudiante. null si no aplica o no respondio.
     private ApiResponseDto sigse;
 
-    /** Solo estudiantes: true/false segun estado_matriculacion. null si no hay SIGSE. */
+    /** Solo estudiantes: true/false segun estado_matriculacion. null si no hay consulta. */
     private Boolean matriculado;
 
     /** Ultimo movimiento registrado por este escaneo (null si el ingreso fue bloqueado). */
