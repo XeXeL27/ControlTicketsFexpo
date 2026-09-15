@@ -1,0 +1,7 @@
+# Atributos de git del proyecto (aplican a todos los que clonan el repo).
+
+# CLAUDE.md lo editan varias personas y varias sesiones de Claude a la vez.
+# Con merge=union, si dos cambios tocan las mismas lineas git NO frena con un
+# conflicto: deja las lineas de los dos lados. Lo peor que puede pasar es un
+# parrafo repetido (se limpia a mano); nunca un pull o un push trabado por este archivo.
+CLAUDE.md merge=union

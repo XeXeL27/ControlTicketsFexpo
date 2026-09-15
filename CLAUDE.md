@@ -88,7 +88,6 @@ Hecho:
     Columnas por POSICIÓN fija: **`ru, nombre completo, ci, carrera`** (así lo genera
     Javier; nada más). El nombre completo va en un solo campo → se guarda en
     `Persona.nombre` con `paterno=""`. Separador `,`/`;` autodetectado.
-    Devuelve `{totalFilas, creados, errores:[{fila,motivo}]}`.
   - **Codificación**: Excel exporta CSV en tres codificaciones según la opción que
     se elija al guardar (UTF-8, Windows-1252 y **CP850** en "CSV (MS-DOS)"), y el
     archivo no dice cuál es. Se intenta UTF-8 **estricto**; si falla, se decodifica
@@ -149,6 +148,11 @@ Hecho:
   ningún `alert()`/`confirm()`/`prompt()` nativo ni markup de modal a mano; todas las
   vistas los usan.
 
+- **Impresión por carrera y en el orden de la tabla**: filtro de carrera (acota el
+  avance, el pliego y la tabla), botón "Imprimir todos los no impresos" y tanda por
+  hojas como alternativa. El PDF sale en el orden en que se ve la tabla (clic en un
+  encabezado para ordenar). Barra superior y menú fijos: solo scrollea el contenido.
+
 Pendiente:
 - **Arte (plantillas PNG) de administrativo y particular** + generalizar
   `TicketRenderer` (hoy `pdfPliegoEstudiantes`/`DatosTicketEstudiante` tienen
@@ -185,6 +189,9 @@ Copiado de `esccuela-tecnica` (misma base, mismo sistema de seguridad).
   (pestañas Estudiantes/Administrativos/Particulares): avance de la tirada, generación
   del pliego por tandas y marca impreso/pendiente por ticket. Columnas según la
   categoría; cartel "plantilla pendiente" cuando no hay arte.
+- **Scroll**: `App.vue` ocupa `100vh`; la barra superior y el menú quedan fijos y
+  el **único** elemento con scroll es `<main class="contenido">`, no `window`. Si una
+  vista necesita llevar algo a la vista, lo hace dentro de ese elemento.
 
 **Componentes y composables reutilizables** (usarlos en vez de reinventar; están
 todos comentados en español):
@@ -196,6 +203,11 @@ todos comentados en español):
   el slot `#col-<clave>` y los botones con `#acciones`, y se agregan filtros propios
   con `#herramientas`. El buscador recorre **todas** las columnas y compara sin
   tildes ("pena" encuentra "PEÑA"). Trae su propia `.card`: no envolverla en otra.
+  **Ordena** con clic en el encabezado (A→Z, Z→A, original; `ordenable: false` en la
+  columna o en la tabla lo apaga). El orden elegido se lee con `v-model:orden` y se
+  aplica con `utils/orden.ts → ordenarFilas()` (collator `es`, numérico, sin tildes;
+  la Ñ va después de la N). Si otra parte necesita el MISMO orden que la tabla, usar
+  esa función y no otra: Impresión la usa para mandar el orden al pliego.
 - **`components/ModalBase.vue`** — cáscara de modal (fondo, cerrar por click-afuera y
   **ESC**, slots `titulo`/cuerpo/`pie`). Reemplaza todo el markup `.modal-fondo` a mano.
   Truco de formularios: el `<form id="x">` va en el cuerpo y el botón submit en `#pie`
@@ -237,7 +249,8 @@ dto/           Objetos de transferencia (entrada y salida) por módulo.
 config/        Auditoría, WebConfig (/api), AdminInitializer, seguridad.
 config/security/  JwtService, JwtAuthenticationFilter, SecurityConfig, AutorizacionService.
 exception/     Excepciones de negocio + GlobalExceptionHandler.
-enums/         EstadoRegistro (borrado lógico), Genero, CategoriaTicket, TipoAcceso.
+enums/         EstadoRegistro (borrado lógico), Genero, CategoriaTicket, TipoAcceso,
+               FormatoPliego (medidas del pliego de impresión, ver 8.1).
 Utils/         Utilidades sin estado (ojo: U mayúscula, es el nombre real del paquete).
   qr/          QrGenerator (ZXing).
   ticket/      TicketRenderer (rellena la plantilla PNG y exporta PNG/PDF) +
@@ -316,9 +329,9 @@ Otros comandos de build/verificación (Maven wrapper):
                         #   ./mvnw test -Dtest=NombreDeLaClase#nombreDelMetodo
 ```
 
-> **El perfil `jarv` no es opcional.** `application.properties` trae el datasource
-> vacío y `ddl-auto=validate`; sin `-Dspring-boot.run.profiles=jarv` el arranque
-> falla. Lo mismo vale para el jar: `java -jar target/*.jar --spring.profiles.active=jarv`.
+> **El perfil `jarv` no es opcional.** `application.properties` apunta a una BD de
+> relleno (`.../NOMBRE_BD`), con usuario/clave vacíos, `ddl-auto=validate` y puerto
+> 8080; sin `-Dspring-boot.run.profiles=jarv` el arranque falla. Lo mismo vale para el jar: `java -jar target/*.jar --spring.profiles.active=jarv`.
 
 > `.vscode/launch.json` (config "Spring Boot-ControlTicketsApplication") apunta a un
 > `envFile` `${workspaceFolder}/.env` que **no existe** y no fija el perfil, así que
@@ -338,12 +351,21 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
   variable de entorno con la URL del backend; si se cambia el puerto 9600 hay que
   tocar el proxy. En producción el frontend debe servirse detrás de algo que
   mapee `/api` al backend.
+- **`vite.config.js` y `vite.config.d.ts` no se editan a mano**: los emite
+  `vue-tsc -b` desde `vite.config.ts` (porque `tsconfig.node.json` es `composite`
+  sin `noEmit`) y están versionados. Vite carga el **`.js` antes que el `.ts`**, así
+  que un cambio en `vite.config.ts` no toma efecto en `npm run dev` hasta que
+  `npm run build` regenera el `.js`.
+- Gestor de paquetes: **npm** (`package-lock.json`). Quedan restos de pnpm
+  (`pnpm-lock.yaml`, más viejo que el de npm, y `pnpm-workspace.yaml` con un valor
+  sin completar); no mezclar gestores.
 
 ---
 
 ## 7. Configuración y perfiles
 
-- `application.properties` → base, con valores **vacíos** (para el servidor).
+- `application.properties` → base (para el servidor): credenciales **vacías** y la
+  URL de la BD con un nombre de relleno (`NOMBRE_BD`).
 - `application-jarv.properties` → entorno local de Javier. **Está en `.gitignore`,
   NO se sube** (tiene la clave de BD y el secreto JWT).
 - Perfil activo en local: `jarv`. En servidor se usará otro perfil.
@@ -355,8 +377,32 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
 > git**, así que aparece como untracked y sus credenciales quedan en riesgo de
 > commit. Si existe, renombralo a `application-jarv.properties`.
 
-> Nota: ya es un repositorio git (rama `main`, primer commit hecho). El `.git`
-> existe; no hace falta `git init`.
+### Git: subir y bajar sin errores
+
+Repo: `origin` = `github.com/XeXeL27/ControlTicketsFexpo`, rama `main`. Otros
+colaboradores integran por **pull requests en GitHub** (rama `control`), así que
+`origin/main` suele tener commits de merge que la copia local todavía no tiene.
+
+Los dos errores que ya pasaron (2026-09-15) y cómo quedaron resueltos:
+- **Al bajar: "Your local changes to the following files would be overwritten by
+  merge: CLAUDE.md".** Pasa cuando CLAUDE.md queda modificado sin commitear (lo
+  editan las sesiones de Claude) y en GitHub también cambió. Descartarlo **pierde la
+  documentación**. Resuelto con la config local `pull.rebase=true` +
+  `rebase.autoStash=true` + `merge.autoStash=true` (guarda lo modificado, baja y lo
+  vuelve a poner) y con `.gitattributes` → `CLAUDE.md merge=union` (si dos cambios
+  tocan las mismas líneas, quedan las de los dos en vez de un conflicto).
+- **Al subir: "rejected … non-fast-forward".** Pasa cuando GitHub tiene commits que
+  la copia local no (los merge de PR). Hay que bajar antes de subir: en VS Code usar
+  **Sincronizar cambios** (↻), no solo "Push"; o por consola `./subir.sh "mensaje"`,
+  que commitea todo, hace `pull --rebase --autostash` y sube.
+
+> **Regla para Claude:** si tocás CLAUDE.md, commitealo **junto con el código** del
+> mismo cambio; no lo dejes modificado. `subir.sh` frena si ve archivos que pueden
+> tener claves (`*.properties` que no sea el base, `.env`).
+> La config `pull.rebase`/`autoStash` es **local** (`.git/config`); en otra máquina
+> hay que repetir: `git config pull.rebase true && git config rebase.autoStash true
+> && git config merge.autoStash true`. Un conflicto en **código** (dos personas en
+> las mismas líneas) sí frena y se resuelve a mano: `union` es solo para CLAUDE.md.
 
 Claves importantes del perfil `jarv`:
 - BD: `jdbc:postgresql://localhost:5432/bd_control_tickets_v1`; usuario y clave
@@ -401,8 +447,11 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
   código). Devuelve `{totalFilas, creados, actualizados, errores}`.
 - `POST /previsualizar` — igual que estudiantes pero con columnas de administrativo.
 
-**Tickets** (ADMINISTRADOR + CONTROL, salvo emitir) — `/api/tickets`
+**Tickets** (ADMINISTRADOR + CONTROL en consultas; emisión e impresión solo ADMINISTRADOR) — `/api/tickets`
 - `GET /listar` · `GET /obtener?idTicket=`
+- `GET /{idTicket}/png` · `GET /{idTicket}/pdf` — rinden el ticket con datos de BD.
+- `GET /{idTicket}/qr` — solo el QR del ticket (PNG 320px, contenido = `qrToken`);
+  sirve para las categorías que todavía no tienen plantilla (administrativo).
 - `POST /emitir-estudiante?idEstudiante=` — **solo ADMINISTRADOR**; idempotente.
 - `POST /emitir-administrativo?idAdministrativo=` — **solo ADMINISTRADOR**; idempotente.
 - `POST /emitir-estudiantes-masivo` — **solo ADMINISTRADOR**. Cuerpo opcional: una
@@ -418,6 +467,13 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
     **PDF del pliego** de esa categoría. Si la categoría no tiene arte
     (`plantillaDisponible=false`, hoy todo salvo ESTUDIANTE) → **400** con mensaje claro.
   - `PATCH /impresion/marcar?idTicket=&impreso=` · `POST /impresion/reiniciar?categoria=`
+  - `carrera=` (opcional, solo ESTUDIANTE) acota `resumen` y `pliego` a una carrera
+    (`ticket.estudiante.carrera`, comparación **exacta**: el frontend manda el valor
+    tal como está guardado). `reiniciar` sigue siendo por categoría entera.
+  - Cuerpo opcional del `pliego`: lista de `idTicket` en el orden en que se ven en la
+    tabla. Solo cambia la **posición** en el PDF (y cuáles toma una tanda: los primeros
+    N de esa lista); qué tickets entran lo sigue decidiendo el backend. Los que no
+    vienen en la lista van al final por `idTicket`. Sin cuerpo = orden de emisión.
 
 **Previsualización de CSV** — `POST /api/estudiantes/previsualizar` y
 `POST /api/administrativos/previsualizar` (multipart, campo `archivo`). Corre el
@@ -425,7 +481,6 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
 codificación detectada, el separador, si hubo encabezado, cuántas filas son altas y
 cuántas actualizaciones, más las primeras 15 filas ya parseadas. Alimenta la vista
 previa de las pantallas de estudiantes y administrativos.
-- `GET /{idTicket}/png` · `GET /{idTicket}/pdf` — rinden el ticket con datos de BD.
 
 **QR y demo** (ADMINISTRADOR + CONTROL)
 - `GET /api/qr/generar?contenido=&tamano=` → PNG del QR (utilidad de prueba).
@@ -514,6 +569,7 @@ Ticket  (control de ingreso)
   codigoIdentificacion  (único, legible: "CODIGO TICKETS" del diseño)
   qrToken               (único, UUID; contenido del QR)
   dentro                (boolean; estado actual para el monitoreo)
+  impreso · fechaImpresion  (avance de la tirada en la imprenta, ver 8.1)
   persona (FK)          -> nombre completo + CI
   estudiante / administrativo / particular (FK opcionales; solo una según categoría)
   + auditoría / estado
@@ -579,3 +635,15 @@ estudiante, impresión por categoría.
   `ResumenImpresionDto.plantillaDisponible`. Verificado: resumen por categoría OK,
   pliego ESTUDIANTE → 200/PDF 1 pág, pliego ADMINISTRATIVO → 400 con mensaje amable.
 - `./mvnw compile` OK.
+
+**Sesión 6 (layout fijo + impresión por carrera + orden por columna + git):**
+- API real con `marcar=false` (no se tocó ninguna marca): conteos por carrera iguales
+  a los tickets reales; pliego de una carrera = 23 hojas para 179 tickets. El orden
+  del PDF se verificó **leyendo los QR de la hoja** con el ZXing del proyecto (sin
+  orden / invertido / A→Z por nombre).
+- Chrome headless: barra y menú no se mueven al scrollear; con la API simulada (no
+  había pendientes reales), el cuerpo mandado al pliego = orden de la tabla; Ñ
+  después de N; R.U. numérico.
+- Git: reproducido en un clon aislado el error "would be overwritten by merge:
+  CLAUDE.md" y verificado que con `pull.rebase` + `autoStash` + `merge=union` el pull
+  y `subir.sh` pasan sin error, incluso con un merge de PR en el medio.
