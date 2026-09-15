@@ -22,8 +22,11 @@ public class ValidacionTicketDto {
     /** true = la persona quedo dentro del recinto tras este escaneo. */
     private boolean dentro;
 
-    /** true = el ingreso fue denegado (estudiante no matriculado). */
+    /** true = el movimiento fue denegado (duplicado o estudiante no matriculado). */
     private boolean bloqueado;
+
+    /** Motivo del rechazo: YA_DENTRO, YA_FUERA o NO_MATRICULADO (null si no bloqueo). */
+    private String motivo;
 
     private String mensaje;
 

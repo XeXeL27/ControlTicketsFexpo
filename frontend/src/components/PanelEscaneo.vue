@@ -14,6 +14,7 @@ import { computed, ref } from 'vue'
 import axios from 'axios'
 import EscannerQr from '@/components/EscannerQr.vue'
 import Alerta from '@/components/Alerta.vue'
+import ModalBase from '@/components/ModalBase.vue'
 import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
 import { validarTicket } from '@/api/control.service'
@@ -36,9 +37,30 @@ const procesando = ref(false)
 const resultado = ref<ValidacionTicketDto | null>(null)
 const errorValidacion = ref('')
 const manual = ref('')
+// Modal de aviso bien visible cuando el movimiento fue rechazado (ya dentro,
+// ya fuera o no matriculado).
+const mostrarAviso = ref(false)
 
 // La camara esta activa solo si el panel esta abierto y no esta validando.
 const escaneando = computed(() => props.activo && !procesando.value)
+
+/** Contenido del modal de aviso segun el motivo del rechazo. */
+const aviso = computed(() => {
+  const r = resultado.value
+  if (r?.motivo === 'YA_DENTRO') {
+    return {
+      titulo: 'Persona YA DENTRO del recinto',
+      texto: 'La ENTRADA ya fue registrada. No puede volver a entrar.',
+    }
+  }
+  if (r?.motivo === 'YA_FUERA') {
+    return {
+      titulo: 'Persona FUERA del recinto',
+      texto: 'No hay ENTRADA registrada, no se encuentra dentro. No puede registrar una SALIDA.',
+    }
+  }
+  return { titulo: 'INGRESO DENEGADO', texto: r?.mensaje ?? 'No se pudo registrar el movimiento.' }
+})
 
 // Antirrebote: el mismo codigo leido dos veces en <1.5s se ignora (un solo
 // escaneo fisico puede decodificarse varias veces seguidas).
@@ -75,12 +97,14 @@ async function procesar(codigo: string): Promise<void> {
     resultado.value = dto
     alertas.exito(`${props.tipo} registrada (${dto.codigoIdentificacion})`)
   } catch (e) {
-    // 409 = entrada bloqueada por la matricula: el cuerpo es el ValidacionTicketDto.
+    // 409 = movimiento rechazado (duplicado o no matriculado): el cuerpo trae
+    // el ValidacionTicketDto con el motivo. Se muestra un modal bien visible.
     if (axios.isAxiosError(e) && e.response?.status === 409) {
       resultado.value = e.response.data as ValidacionTicketDto
-      alertas.error('Ingreso denegado')
+      mostrarAviso.value = true
+      alertas.error('Movimiento no registrado')
     } else {
-      // 400 = duplicado / ticket inexistente / otro error de negocio.
+      // 404 = ticket inexistente / otro error.
       errorValidacion.value = mensajeError(e, 'No se pudo validar el ticket')
     }
   } finally {
@@ -196,6 +220,29 @@ function formatearHora(iso?: string): string {
         </div>
       </template>
     </div>
+
+    <!-- Modal de aviso: movimiento rechazado (ya dentro / ya fuera / no matriculado) -->
+    <ModalBase
+      v-if="mostrarAviso && resultado"
+      ancho="440px"
+      :cerrar-al-click-fondo="false"
+      @cerrar="mostrarAviso = false"
+    >
+      <template #titulo>{{ aviso.titulo }}</template>
+
+      <div class="aviso" :class="`aviso--${(resultado.motivo ?? 'NO_MATRICULADO').toLowerCase()}`">
+        <span class="aviso-icono">⚠</span>
+        <div>
+          <strong class="aviso-titulo">{{ aviso.titulo }}</strong>
+          <p class="aviso-texto">{{ aviso.texto }}</p>
+          <p class="aviso-codigo">{{ resultado.codigoIdentificacion }} · {{ resultado.nombreCompleto }}</p>
+        </div>
+      </div>
+
+      <template #pie>
+        <button class="peligro" @click="mostrarAviso = false">Entendido</button>
+      </template>
+    </ModalBase>
   </section>
 </template>
 
@@ -288,4 +335,32 @@ function formatearHora(iso?: string): string {
 .chip.verde { background: #dcfce7; color: #166534; }
 .chip.rojo { background: #fee2e2; color: #991b1b; }
 .chip.gris { background: #e5e7eb; color: #374151; }
+
+/* Modal de aviso de movimiento rechazado */
+.aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid;
+}
+.aviso-icono {
+  font-size: 26px;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid currentColor;
+}
+.aviso-titulo { font-size: 17px; display: block; }
+.aviso-texto { margin: 6px 0 0; font-size: 14px; }
+.aviso-codigo { margin: 8px 0 0; font-family: monospace; font-size: 13px; opacity: 0.8; }
+.aviso--ya_dentro { background: #fef2f2; border-color: #dc2626; color: #991b1b; }
+.aviso--ya_fuera { background: #fffbeb; border-color: #d97706; color: #92400e; }
+.aviso--no_matriculado { background: #fef2f2; border-color: #dc2626; color: #991b1b; }
 </style>

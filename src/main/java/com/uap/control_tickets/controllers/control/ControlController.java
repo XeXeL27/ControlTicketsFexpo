@@ -27,7 +27,7 @@ import java.util.List;
  * Ruta base: /api/control (el prefijo /api lo agrega WebConfig).
  *  - POST /validar: escanea el qr_token con el escaner dedicado (ENTRADA o
  *    SALIDA). Rechaza duplicados (entrar estando dentro / salir estando fuera)
- *    y, para estudiantes que entran, valida la matricula (409 si no matriculado).
+ *    y a estudiantes no matriculados con 409 + motivo en el cuerpo.
  *  - GET /dentro: quienes estan actualmente dentro del recinto.
  */
 @RestController
@@ -41,9 +41,9 @@ public class ControlController {
     @PostMapping("/validar")
     @Operation(summary = "Valida el qr_token escaneado y registra el movimiento del escaner",
             description = "Busca el ticket por qr_token en la BD local y registra la ENTRADA o "
-                    + "SALIDA segun el escaner dedicado (tipoMovimiento). Rechaza intentos "
-                    + "duplicados con 400. Para estudiantes que entran valida la matricula: si no "
-                    + "esta matriculado, el ingreso se bloquea (409).")
+                    + "SALIDA segun el escaner dedicado (tipoMovimiento). Intento duplicado "
+                    + "(entrar estando dentro / salir estando fuera) o estudiante no matriculado "
+                    + "al entrar: 409 con motivo (YA_DENTRO/YA_FUERA/NO_MATRICULADO).")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<ValidacionTicketDto> validar(@Valid @RequestBody ValidacionRequestDto request) {
         ValidacionTicketDto dto = controlService.validar(request.getCodigo(), request.getTipoMovimiento());

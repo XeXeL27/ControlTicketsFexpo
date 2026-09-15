@@ -19,9 +19,10 @@ public interface ControlService {
      * Valida el codigo escaneado (qr_token) para el escaner indicado.
      *
      * Reglas:
-     *  - ENTRADA estando dentro → error de negocio (ya entro).
-     *  - SALIDA estando fuera → error de negocio (no entro).
-     *  - ENTRADA de estudiante no matriculado → bloqueada (409, sin persistir).
+     *  - ENTRADA estando dentro → 409 con motivo YA_DENTRO (ya entro).
+     *  - SALIDA estando fuera → 409 con motivo YA_FUERA (no entro).
+     *  - ENTRADA de estudiante no matriculado → 409 con motivo NO_MATRICULADO.
+     * En ninguno de esos casos se registra el movimiento ni se toca la BD.
      */
     ValidacionTicketDto validar(String codigo, TipoAcceso tipoMovimiento);
 

@@ -31,7 +31,7 @@ import java.util.List;
  *  1. Busca el ticket por qr_token (solo los activos). 404 si no existe.
  *  2. Determina internamente la categoria y los datos de la persona (BD local).
  *  3. Anti-clones: ENTRADA estando dentro, o SALIDA estando fuera, se rechazan
- *     con error de negocio (no se registra nada).
+ *     con 409 + motivo (no se registra nada).
  *  4. Solo al ENTRAR un estudiante: valida la matricula con el RU; si no esta
  *     matriculado bloquea el ingreso (no persiste).
  *  5. Registra el movimiento (por el escaner dedicado) y actualiza el flag
@@ -68,12 +68,18 @@ public class ControlServiceImpl implements ControlService {
 
         // Anti-clones: el escaner es dedicado, el estado tiene que coincidir.
         if (tipoMovimiento == TipoAcceso.ENTRADA && ticket.isDentro()) {
-            throw new NegocioException(
+            dto.setBloqueado(true);
+            dto.setMotivo("YA_DENTRO");
+            dto.setMensaje(
                     "La persona ya se encuentra DENTRO del recinto (ENTRADA ya registrada).");
+            return dto;
         }
         if (tipoMovimiento == TipoAcceso.SALIDA && !ticket.isDentro()) {
-            throw new NegocioException(
+            dto.setBloqueado(true);
+            dto.setMotivo("YA_FUERA");
+            dto.setMensaje(
                     "La persona no se encuentra DENTRO del recinto (no hay ENTRADA registrada).");
+            return dto;
         }
 
         // Matricula: solo estudiantes al ENTRAR. Determina si el ingreso esta permitido.
@@ -87,6 +93,7 @@ public class ControlServiceImpl implements ControlService {
             // Entrada bloqueada si no se puede confirmar la matricula.
             if (Boolean.FALSE.equals(dto.getMatriculado())) {
                 dto.setBloqueado(true);
+                dto.setMotivo("NO_MATRICULADO");
                 dto.setMensaje("Estudiante no matriculado (o sin confirmacion de matricula). No se permite el ingreso.");
                 return dto;
             }
