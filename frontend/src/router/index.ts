@@ -7,7 +7,9 @@ import Login from '@/views/Login.vue'
 import Home from '@/views/Home.vue'
 import Estudiantes from '@/views/Estudiantes.vue'
 import Administrativos from '@/views/Administrativos.vue'
+import Docentes from '@/views/Docentes.vue'
 import Impresion from '@/views/Impresion.vue'
+import Entrega from '@/views/Entrega.vue'
 import Personas from '@/views/Personas.vue'
 import Usuarios from '@/views/Usuarios.vue'
 import Roles from '@/views/Roles.vue'
@@ -19,7 +21,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/control', component: ControlValidador },
   { path: '/estudiantes', component: Estudiantes },
   { path: '/administrativos', component: Administrativos },
+  { path: '/docentes', component: Docentes },
   { path: '/impresion', component: Impresion },
+  { path: '/entrega', component: Entrega },
   { path: '/personas', component: Personas },
   { path: '/usuarios', component: Usuarios },
   { path: '/roles', component: Roles },

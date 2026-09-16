@@ -27,6 +27,9 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
     // Ticket ya emitido para un administrativo.
     Optional<Ticket> findFirstByAdministrativoIdAdministrativoAndEstado(Long idAdministrativo, EstadoRegistro estado);
 
+    // Ticket ya emitido para un docente.
+    Optional<Ticket> findFirstByDocenteIdDocenteAndEstado(Long idDocente, EstadoRegistro estado);
+
     // --- Listados ---
     List<Ticket> findAllByEstado(EstadoRegistro estado);
 

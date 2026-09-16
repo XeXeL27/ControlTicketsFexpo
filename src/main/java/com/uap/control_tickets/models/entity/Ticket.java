@@ -59,6 +59,18 @@ public class Ticket extends AuditoriaConfig {
     @Column(name = "fecha_impresion")
     private java.time.Instant fechaImpresion;
 
+    /**
+     * true = el ticket físico ya se le entregó a la persona.
+     * Control aparte de la impresión: un ticket puede estar impreso pero todavía
+     * sin entregar. Quién lo marcó queda en la auditoría (_registro/_modificacion).
+     */
+    @Column(name = "entregado", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean entregado = false;
+
+    /** Cuando se marcó la entrega (null si todavía no se entregó). */
+    @Column(name = "fecha_entrega")
+    private java.time.Instant fechaEntrega;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_persona", nullable = false)
     private Persona persona;
@@ -71,6 +83,10 @@ public class Ticket extends AuditoriaConfig {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_administrativo")
     private Administrativo administrativo;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_docente")
+    private Docente docente;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_particular")

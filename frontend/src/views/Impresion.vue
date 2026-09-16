@@ -48,6 +48,7 @@ const categoria = ref<CategoriaTicket>('ESTUDIANTE')
 const CATEGORIAS: { valor: CategoriaTicket; nombre: string }[] = [
   { valor: 'ESTUDIANTE', nombre: 'Estudiantes' },
   { valor: 'ADMINISTRATIVO', nombre: 'Administrativos' },
+  { valor: 'DOCENTE', nombre: 'Docentes' },
   { valor: 'EXTERNO', nombre: 'Particulares' },
 ]
 const categoriaNombre = computed(
@@ -89,6 +90,8 @@ const columnas = computed<ColumnaTabla[]>(() => {
     base.push({ clave: 'ru', titulo: 'R.U.', ancho: '100px' }, { clave: 'carrera', titulo: 'Carrera' })
   } else if (categoria.value === 'ADMINISTRATIVO') {
     base.push({ clave: 'codigoAdministrativo', titulo: 'Código adm.', ancho: '140px' })
+  } else if (categoria.value === 'DOCENTE') {
+    base.push({ clave: 'codigoDocente', titulo: 'Código docente', ancho: '150px' })
   } else {
     base.push({ clave: 'ci', titulo: 'CI', ancho: '120px' })
   }

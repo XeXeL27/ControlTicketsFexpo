@@ -24,6 +24,9 @@ public interface TicketService {
     /** Emite el ticket de un administrativo (código ADM-… + qrToken). Idempotente. */
     TicketDetalleDto emitirAdministrativo(Long idAdministrativo);
 
+    /** Emite el ticket de un docente (código DOC-… + qrToken). Idempotente. */
+    TicketDetalleDto emitirDocente(Long idDocente);
+
     /**
      * Emite el ticket de varios estudiantes de una sola vez.
      * Si la lista es null o vacía se toman TODOS los estudiantes activos.
@@ -58,6 +61,9 @@ public interface TicketService {
 
     /** Marca o desmarca un ticket como impreso (por si hubo que reimprimir uno). */
     void marcarImpreso(Long idTicket, boolean impreso);
+
+    /** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+    TicketDetalleDto marcarEntrega(Long idTicket, boolean entregado);
 
     /** Vuelve a dejar como no impresos todos los tickets de una categoria (reinicia esa tanda). */
     int reiniciarImpresion(CategoriaTicket categoria);

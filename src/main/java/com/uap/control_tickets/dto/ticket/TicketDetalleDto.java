@@ -18,6 +18,12 @@ public class TicketDetalleDto {
     /** Cuando se genero el pliego que lo incluyo (null si nunca se imprimio). */
     private java.time.Instant fechaImpresion;
 
+    /** true = el ticket físico ya se entregó a la persona. */
+    private boolean entregado;
+
+    /** Cuando se marcó la entrega (null si todavía no se entregó). */
+    private java.time.Instant fechaEntrega;
+
     private Long idPersona;
     private String nombreCompleto;
     private String ci;
@@ -27,4 +33,5 @@ public class TicketDetalleDto {
     private String facultad;
     private String carrera;
     private String codigoAdministrativo;
+    private String codigoDocente;
 }

@@ -9,6 +9,10 @@ export interface TicketDetalleDto {
   impreso: boolean
   /** Cuando se genero el pliego que lo incluyo (ISO-8601), null si nunca. */
   fechaImpresion?: string
+  /** true = el ticket físico ya se entregó a la persona. */
+  entregado: boolean
+  /** Cuando se marcó la entrega (ISO-8601), null si todavía no. */
+  fechaEntrega?: string
   idPersona: number
   nombreCompleto: string
   ci: string
@@ -16,6 +20,7 @@ export interface TicketDetalleDto {
   facultad?: string
   carrera?: string
   codigoAdministrativo?: string
+  codigoDocente?: string
 }
 
 // Refleja EmisionMasivaDto: resultado de emitir tickets en lote.
@@ -36,7 +41,7 @@ export interface EmisionMasivaDto {
 export type FormatoPliego = 'MIXTO_8' | 'HORIZONTAL_5'
 
 /** Categorías de ticket (EXTERNO = particular). Coincide con CategoriaTicket del backend. */
-export type CategoriaTicket = 'ESTUDIANTE' | 'ADMINISTRATIVO' | 'EXTERNO'
+export type CategoriaTicket = 'ESTUDIANTE' | 'ADMINISTRATIVO' | 'DOCENTE' | 'EXTERNO'
 
 /** Refleja ResumenImpresionDto (acotado a una categoría). */
 export interface ResumenImpresionDto {

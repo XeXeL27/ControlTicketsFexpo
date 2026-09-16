@@ -125,6 +125,22 @@ public class TicketController {
                 .body(ticketService.emitirAdministrativo(idAdministrativo));
     }
 
+    @PostMapping("/emitir-docente")
+    @Operation(summary = "Emitir el ticket de un docente ya cargado")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> emitirDocente(@RequestParam Long idDocente) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ticketService.emitirDocente(idDocente));
+    }
+
+    @PatchMapping("/entrega")
+    @Operation(summary = "Marca o desmarca un ticket como ENTREGADO (control de entrega física)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> marcarEntrega(@RequestParam Long idTicket,
+                                                          @RequestParam boolean entregado) {
+        return ResponseEntity.ok(ticketService.marcarEntrega(idTicket, entregado));
+    }
+
     @GetMapping(value = "/{idTicket}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Solo el QR del ticket (PNG)",
             description = "Útil para categorías sin plantilla de ticket todavía (ej. administrativo)")

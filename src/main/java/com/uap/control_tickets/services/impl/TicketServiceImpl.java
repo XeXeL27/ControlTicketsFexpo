@@ -11,9 +11,11 @@ import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
 import com.uap.control_tickets.models.entity.Administrativo;
+import com.uap.control_tickets.models.entity.Docente;
 import com.uap.control_tickets.models.entity.Estudiante;
 import com.uap.control_tickets.models.entity.Ticket;
 import com.uap.control_tickets.models.repository.AdministrativoDao;
+import com.uap.control_tickets.models.repository.DocenteDao;
 import com.uap.control_tickets.models.repository.EstudianteDao;
 import com.uap.control_tickets.models.repository.TicketDao;
 import com.uap.control_tickets.services.interfaces.TicketService;
@@ -46,6 +48,7 @@ public class TicketServiceImpl implements TicketService {
     private final TicketDao ticketDao;
     private final EstudianteDao estudianteDao;
     private final AdministrativoDao administrativoDao;
+    private final DocenteDao docenteDao;
     private final TicketRenderer ticketRenderer;
 
     /**
@@ -328,6 +331,38 @@ public class TicketServiceImpl implements TicketService {
     }
 
     @Override
+    @Transactional
+    public TicketDetalleDto emitirDocente(Long idDocente) {
+        Docente doc = docenteDao.findById(idDocente)
+                .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Docente no encontrado"));
+
+        var existente = ticketDao.findFirstByDocenteIdDocenteAndEstado(idDocente, EstadoRegistro.ACTIVO);
+        if (existente.isPresent()) {
+            return toDetalleDto(existente.get());
+        }
+
+        Ticket ticket = new Ticket();
+        ticket.setCategoria(CategoriaTicket.DOCENTE);
+        ticket.setPersona(doc.getPersona());
+        ticket.setDocente(doc);
+        ticket.setQrToken(nuevoQrToken());
+        ticket.setCodigoIdentificacion(nuevoCodigo("DOC", CategoriaTicket.DOCENTE));
+        ticket.setDentro(false);
+
+        return toDetalleDto(ticketDao.save(ticket));
+    }
+
+    @Override
+    @Transactional
+    public TicketDetalleDto marcarEntrega(Long idTicket, boolean entregado) {
+        Ticket t = buscarActivo(idTicket);
+        t.setEntregado(entregado);
+        t.setFechaEntrega(entregado ? Instant.now() : null);
+        return toDetalleDto(ticketDao.save(t));
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public byte[] renderPng(Long idTicket) {
         return ticketRenderer.pngEstudiante(datosEstudiante(buscarActivo(idTicket)));
@@ -394,6 +429,8 @@ public class TicketServiceImpl implements TicketService {
         dto.setDentro(t.isDentro());
         dto.setImpreso(t.isImpreso());
         dto.setFechaImpresion(t.getFechaImpresion());
+        dto.setEntregado(t.isEntregado());
+        dto.setFechaEntrega(t.getFechaEntrega());
 
         dto.setIdPersona(t.getPersona().getIdPersona());
         dto.setNombreCompleto(t.getPersona().getNombreCompleto());
@@ -406,6 +443,9 @@ public class TicketServiceImpl implements TicketService {
         }
         if (t.getAdministrativo() != null) {
             dto.setCodigoAdministrativo(t.getAdministrativo().getCodigoAdministrativo());
+        }
+        if (t.getDocente() != null) {
+            dto.setCodigoDocente(t.getDocente().getCodigoDocente());
         }
         return dto;
     }

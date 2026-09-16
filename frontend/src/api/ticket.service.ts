@@ -25,6 +25,19 @@ export function emitirTicketAdministrativo(idAdministrativo: number) {
     .then((r) => r.data)
 }
 
+export function emitirTicketDocente(idDocente: number) {
+  return http
+    .post<TicketDetalleDto>('/tickets/emitir-docente', null, { params: { idDocente } })
+    .then((r) => r.data)
+}
+
+/** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+export function marcarEntrega(idTicket: number, entregado: boolean) {
+  return http
+    .patch<TicketDetalleDto>('/tickets/entrega', null, { params: { idTicket, entregado } })
+    .then((r) => r.data)
+}
+
 // Solo el QR del ticket (para categorías sin plantilla aún, ej. administrativo).
 export function obtenerTicketQr(idTicket: number) {
   return http.get(`/tickets/${idTicket}/qr`, { responseType: 'blob' }).then((r) => r.data as Blob)
