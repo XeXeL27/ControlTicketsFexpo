@@ -9,6 +9,7 @@ import java.time.Instant;
 public class PersonaDentroDto {
 
     private Long idTicket;
+    private Long idPersona;
     private String codigoIdentificacion;
     private String categoria;
     private String nombreCompleto;

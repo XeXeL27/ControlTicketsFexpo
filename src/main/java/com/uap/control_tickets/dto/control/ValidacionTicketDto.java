@@ -36,6 +36,7 @@ public class ValidacionTicketDto {
     private String carrera;
     private String facultad;
     private String codigoAdministrativo;
+    private String codigoDocente;
 
     // SIGSE: solo para tickets de estudiante. null si no aplica o no respondio.
     private ApiResponseDto sigse;

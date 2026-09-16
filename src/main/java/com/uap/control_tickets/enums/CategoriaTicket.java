@@ -7,5 +7,6 @@ package com.uap.control_tickets.enums;
 public enum CategoriaTicket {
     ESTUDIANTE,       // datos por CSV: nombre completo + RU + CI + carrera/facultad
     ADMINISTRATIVO,   // datos por CSV: nombre completo + CI + codigo administrativo
+    DOCENTE,         // datos por CSV: codigo docente + nombre completo + CI + carrera
     EXTERNO           // venta manual: nombre completo + CI
 }

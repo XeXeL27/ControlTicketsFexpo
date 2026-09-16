@@ -49,27 +49,38 @@ public class ControlServiceImpl implements ControlService {
     @Override
     @Transactional
     public ValidacionTicketDto validar(String codigo) {
+        return validar(codigo, null);
+    }
+
+    @Override
+    @Transactional
+    public ValidacionTicketDto validar(String codigo, TipoAcceso solicitado) {
         String qr = codigo == null ? "" : codigo.trim();
         if (qr.isEmpty()) {
             throw new NegocioException("Ingrese el codigo del ticket");
         }
 
-        Ticket ticket = ticketDao.findByQrToken(qr)
+        Ticket ticket = ticketDao.buscarParaControl(qr)
                 .filter(t -> t.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseThrow(() -> new RecursoNoEncontradoException(
                         "Ticket no encontrado o no valido: " + qr));
 
         ValidacionTicketDto dto = armarRespuestaConDatosLocales(ticket);
+        if (solicitado != null && ticket.isDentro() == (solicitado == TipoAcceso.ENTRADA)) {
+            dto.setMensaje(ticket.isDentro() ? "Ya se encuentra dentro. No se duplicó la entrada."
+                    : "Ya se encuentra fuera. No se duplicó la salida.");
+            return dto;
+        }
 
         // SIGSE: solo estudiantes. Determina si el ingreso esta permitido.
         if (ticket.getCategoria() == CategoriaTicket.ESTUDIANTE) {
             ApiResponseDto sigse = consultarSigse(dto.getRu());
             dto.setSigse(sigse);
             dto.setMatriculado(sigse != null && sigse.getData() != null
-                    && sigse.getData().isEstadoMatriculacion());
+                    ? sigse.getData().isEstadoMatriculacion() : null);
 
             // Entrada bloqueada si no se puede confirmar la matricula.
-            if (!ticket.isDentro() && Boolean.FALSE.equals(dto.getMatriculado())) {
+            if (!ticket.isDentro() && !Boolean.TRUE.equals(dto.getMatriculado())) {
                 dto.setBloqueado(true);
                 dto.setMensaje("Estudiante no matriculado (o sin confirmacion SIGSE). No se permite el ingreso.");
                 return dto;
@@ -96,21 +107,24 @@ public class ControlServiceImpl implements ControlService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public List<PersonaDentroDto> personasDentro() {
         List<Ticket> dentro = ticketDao.findAllByDentroTrueAndEstado(EstadoRegistro.ACTIVO);
         List<PersonaDentroDto> lista = new ArrayList<>(dentro.size());
+        var entradas = accesoDao.ultimasEntradasDentro(EstadoRegistro.ACTIVO).stream()
+                .collect(java.util.stream.Collectors.toMap(AccesoDao.UltimaEntrada::getIdTicket,
+                        AccesoDao.UltimaEntrada::getEntrada));
 
         for (Ticket ticket : dentro) {
             PersonaDentroDto p = new PersonaDentroDto();
             p.setIdTicket(ticket.getIdTicket());
+            p.setIdPersona(ticket.getPersona().getIdPersona());
             p.setCodigoIdentificacion(ticket.getCodigoIdentificacion());
             p.setCategoria(ticket.getCategoria().name());
             p.setNombreCompleto(ticket.getPersona().getNombreCompleto());
             p.setCi(ticket.getPersona().getCi());
             // Si esta dentro, su ultimo movimiento fue una ENTRADA.
-            accesoDao.findTopByTicketIdTicketOrderByFechaHoraDesc(ticket.getIdTicket())
-                    .ifPresent(a -> p.setEntrada(a.getFechaHora()));
+            p.setEntrada(entradas.get(ticket.getIdTicket()));
             lista.add(p);
         }
         return lista;
@@ -135,6 +149,9 @@ public class ControlServiceImpl implements ControlService {
         } else if (ticket.getCategoria() == CategoriaTicket.ADMINISTRATIVO
                 && ticket.getAdministrativo() != null) {
             dto.setCodigoAdministrativo(ticket.getAdministrativo().getCodigoAdministrativo());
+        } else if (ticket.getCategoria() == CategoriaTicket.DOCENTE && ticket.getDocente() != null) {
+            dto.setCodigoDocente(ticket.getDocente().getCodigoDocente());
+            dto.setCarrera(ticket.getDocente().getCarrera());
         }
         return dto;
     }

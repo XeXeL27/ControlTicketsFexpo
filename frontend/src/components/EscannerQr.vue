@@ -9,7 +9,7 @@
 //   procesa la validacion para que no siga escaneando.
 // - @zxing/browser 0.2.1: decodeFromVideoDevice(deviceId?, video?, callback),
 //   devuelve controles para detener el stream.
-import { onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { onBeforeUnmount, onMounted, ref, nextTick } from 'vue'
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser'
 
 const props = defineProps<{ activo: boolean }>()
@@ -23,8 +23,13 @@ const encendiendo = ref(false)
 
 let lector: BrowserQRCodeReader | null = null
 let controls: IScannerControls | null = null
+let desmontado = false
+let generacion = 0
+let ultimoQr = ''
+let ultimaLectura = 0
 
 async function detener(): Promise<void> {
+  generacion++
   controls?.stop()
   controls = null
   if (video.value?.srcObject) {
@@ -35,6 +40,8 @@ async function detener(): Promise<void> {
 }
 
 async function encender(): Promise<void> {
+  if (desmontado || document.hidden || controls || encendiendo.value) return
+  const intento = ++generacion
   error.value = ''
   encendiendo.value = true
   try {
@@ -43,12 +50,19 @@ async function encender(): Promise<void> {
       throw new Error('No se encontro el elemento de video')
     }
     lector = new BrowserQRCodeReader()
-    controls = await lector.decodeFromVideoDevice(undefined, video.value, (result) => {
+    const nuevosControles = await lector.decodeFromConstraints(
+      { audio: false, video: { facingMode: { ideal: 'environment' } } }, video.value, (result) => {
       const texto = result?.getText()
       if (texto) {
-        emit('codigo', texto)
+        const ahora = Date.now()
+        const repetido = texto === ultimoQr && ahora - ultimaLectura < 1200
+        ultimoQr = texto
+        ultimaLectura = ahora
+        if (props.activo && !desmontado && !repetido) emit('codigo', texto)
       }
     })
+    if (desmontado || intento !== generacion || document.hidden) nuevosControles.stop()
+    else controls = nuevosControles
   } catch (e) {
     const err = e as { name?: string; message?: string }
     const mensaje =
@@ -58,25 +72,23 @@ async function encender(): Promise<void> {
     error.value = 'No se pudo acceder a la camara: ' + mensaje
   } finally {
     encendiendo.value = false
+    if (!desmontado && !document.hidden && intento !== generacion) void encender()
   }
 }
 
-watch(
-  () => props.activo,
-  (activo) => {
-    if (activo) {
-      void encender()
-    } else {
-      void detener()
-    }
-  },
-)
+function visibilidad() {
+  if (document.hidden) void detener()
+  else void encender()
+}
 
 onMounted(() => {
-  if (props.activo) void encender()
+  void encender()
+  document.addEventListener('visibilitychange', visibilidad)
 })
 
 onBeforeUnmount(() => {
+  desmontado = true
+  document.removeEventListener('visibilitychange', visibilidad)
   void detener()
 })
 </script>
@@ -86,7 +98,10 @@ onBeforeUnmount(() => {
     <video ref="video" class="video" muted playsinline></video>
 
     <p v-if="encendiendo" class="estado">Encendiendo camara...</p>
-    <p v-if="error" class="estado error">{{ error }}</p>
+    <div v-if="error" class="estado error">
+      <p>{{ error }}</p>
+      <button type="button" :disabled="encendiendo" @click="encender">Reintentar cámara</button>
+    </div>
     <div v-if="!activo" class="velo">
       <span>{{ error ? 'Camara no disponible' : 'Escaneo en pausa' }}</span>
     </div>

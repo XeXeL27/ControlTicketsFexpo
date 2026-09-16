@@ -60,6 +60,7 @@ export interface ValidacionTicketDto {
   carrera?: string
   facultad?: string
   codigoAdministrativo?: string
+  codigoDocente?: string
   /** Respuesta de SIGSE (solo estudiantes). */
   sigse?: RespuestaSigseDto | null
   /** Solo estudiantes: true/false segun estado_matriculacion. */
@@ -70,10 +71,36 @@ export interface ValidacionTicketDto {
 }
 
 export interface PersonaDentroDto {
+  idPersona: number
   idTicket: number
   codigoIdentificacion: string
   categoria: CategoriaTicket
   nombreCompleto: string
   ci: string
   entrada?: string
+}
+
+export interface ReportePersonaDto {
+  idPersona: number
+  nombreCompleto: string
+  ci: string
+  categorias: CategoriaTicket[]
+  codigos: string[]
+  entradas: number
+  salidas: number
+  dentro: boolean
+  ultimoMovimiento?: string | null
+}
+
+export interface HistorialPersonaDto {
+  movimientos: {
+    idAcceso: number
+    tipo: 'ENTRADA' | 'SALIDA'
+    fechaHora: string
+    codigoTicket: string
+    categoria: CategoriaTicket
+  }[]
+  total: number
+  pagina: number
+  paginas: number
 }

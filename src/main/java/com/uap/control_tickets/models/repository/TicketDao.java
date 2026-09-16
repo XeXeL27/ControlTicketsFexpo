@@ -11,6 +11,14 @@ import java.util.Optional;
 
 @Repository
 public interface TicketDao extends JpaRepository<Ticket, Long> {
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")
+    @org.springframework.data.jpa.repository.Query("select t from Ticket t order by t.idTicket")
+    List<Ticket> ticketsParaReporte();
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select t from Ticket t where t.qrToken = :codigo or t.codigoIdentificacion = :codigo")
+    Optional<Ticket> buscarParaControl(@org.springframework.data.repository.query.Param("codigo") String codigo);
+
+    Optional<Ticket> findFirstByDocenteIdDocenteAndEstado(Long idDocente, EstadoRegistro estado);
 
     // --- Escaneo / validacion ---
     Optional<Ticket> findByQrToken(String qrToken);
@@ -60,6 +68,7 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
             CategoriaTicket categoria, String carrera, EstadoRegistro estado);
 
     // --- Monitoreo en tiempo real ---
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")
     List<Ticket> findAllByDentroTrueAndEstado(EstadoRegistro estado);
 
     long countByDentroTrueAndEstado(EstadoRegistro estado);

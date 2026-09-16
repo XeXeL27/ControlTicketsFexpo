@@ -5,8 +5,8 @@
 // así que se imprime en tiradas separadas: las pestañas de arriba cambian todo el
 // panel (resumen + tabla + generar) a esa categoría.
 //
-// Por ahora solo ESTUDIANTE tiene plantilla de arte cargada; las demás muestran sus
-// conteos pero con el botón de generar deshabilitado hasta que llegue su diseño.
+// ESTUDIANTE usa arte; ADMINISTRATIVO imprime solo el reverso sin fondo.
+// Particulares queda pendiente de su diseño.
 //
 // En estudiantes se puede además filtrar por CARRERA: el filtro acota el avance, el
 // pliego y la tabla, así se imprime (o se completa lo que falte) carrera por carrera.
@@ -48,6 +48,7 @@ const categoria = ref<CategoriaTicket>('ESTUDIANTE')
 const CATEGORIAS: { valor: CategoriaTicket; nombre: string }[] = [
   { valor: 'ESTUDIANTE', nombre: 'Estudiantes' },
   { valor: 'ADMINISTRATIVO', nombre: 'Administrativos' },
+  { valor: 'DOCENTE', nombre: 'Docentes' },
   { valor: 'EXTERNO', nombre: 'Particulares' },
 ]
 const categoriaNombre = computed(
@@ -88,7 +89,14 @@ const columnas = computed<ColumnaTabla[]>(() => {
   if (categoria.value === 'ESTUDIANTE') {
     base.push({ clave: 'ru', titulo: 'R.U.', ancho: '100px' }, { clave: 'carrera', titulo: 'Carrera' })
   } else if (categoria.value === 'ADMINISTRATIVO') {
+    base.push({ clave: 'ci', titulo: 'CI', ancho: '120px' })
     base.push({ clave: 'codigoAdministrativo', titulo: 'Código adm.', ancho: '140px' })
+  } else if (categoria.value === 'DOCENTE') {
+    base.push(
+      { clave: 'ci', titulo: 'CI', ancho: '120px' },
+      { clave: 'codigoDocente', titulo: 'Código docente', ancho: '140px' },
+      { clave: 'carrera', titulo: 'Carrera' },
+    )
   } else {
     base.push({ clave: 'ci', titulo: 'CI', ancho: '120px' })
   }
@@ -166,7 +174,7 @@ const avance = computed(() => {
   return Math.round((resumen.value.impresos / resumen.value.total) * 100)
 })
 
-/** ¿La categoría activa ya tiene plantilla de arte para imprimir? */
+/** ¿La categoría activa tiene un formato disponible para imprimir? */
 const puedeImprimir = computed(() => resumen.value?.plantillaDisponible ?? false)
 
 async function cargar() {
@@ -399,6 +407,16 @@ onMounted(cargar)
     <!-- Generar la proxima tanda -->
     <div class="card" style="margin-bottom:16px">
       <strong>Generar pliego para la imprenta</strong>
+      <Alerta v-if="categoria === 'DOCENTE'" tipo="info">
+        Reverso sin fondo, con las mismas medidas que estudiantes. Incluye el título
+        DOCENTE, nombre, CI, código docente, carrera y código del ticket (DOC) a la izquierda,
+        con el QR a la derecha. Imprimir a tamaño real (100%).
+      </Alerta>
+      <Alerta v-if="categoria === 'ADMINISTRATIVO'" tipo="info">
+        Solo se imprime el reverso, sin diseño de fondo y con las mismas medidas que
+        estudiantes. Dos columnas: nombre, CI y código administrativo a la izquierda;
+        QR a la derecha. Imprimir sobre la parte de atrás del ticket, a tamaño real (100%).
+      </Alerta>
       <p style="color:var(--texto-suave);font-size:13px;margin:6px 0 14px">
         Hoja oficio de 21.5 x 33 cm en vertical. El PDF sale en tamaño real,
         listo para mandar a imprimir.

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // CRUD de Usuarios + gestion de roles, bloqueo y contrasena.
 // Usa las capas de API tipadas de @/api.
-import { ref, onMounted } from 'vue'
+import { computed, nextTick, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import Alerta from '@/components/Alerta.vue'
@@ -44,6 +44,60 @@ const mostrarModal = ref(false)
 const editando = ref<number | null>(null)
 const form = ref<UsuarioDto>({ username: '', password: '', idPersona: '' })
 const errorForm = ref('')
+const busquedaPersona = ref('')
+const sugerenciasAbiertas = ref(false)
+const personaActiva = ref(-1)
+
+function normalizar(texto: string) {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+function etiquetaPersona(persona: PersonaDetalleDto) {
+  return `${persona.nombreCompleto} — CI ${persona.ci}`
+}
+
+const personasSugeridas = computed(() => {
+  const palabras = normalizar(busquedaPersona.value).split(/\s+/).filter(Boolean)
+  return personas.value.filter((p) => {
+    const texto = normalizar(etiquetaPersona(p))
+    return palabras.every((palabra) => texto.includes(palabra))
+  }).slice(0, 20)
+})
+
+function buscarPersona() {
+  form.value.idPersona = ''
+  personaActiva.value = -1
+  sugerenciasAbiertas.value = true
+}
+
+function seleccionarPersona(persona: PersonaDetalleDto) {
+  form.value.idPersona = persona.idPersona
+  busquedaPersona.value = etiquetaPersona(persona)
+  sugerenciasAbiertas.value = false
+  personaActiva.value = -1
+}
+
+function tecladoPersona(evento: KeyboardEvent) {
+  if (evento.key === 'Escape' && sugerenciasAbiertas.value) {
+    evento.preventDefault()
+    evento.stopPropagation()
+    sugerenciasAbiertas.value = false
+  } else if (evento.key === 'ArrowDown' || evento.key === 'ArrowUp') {
+    evento.preventDefault()
+    sugerenciasAbiertas.value = true
+    const cantidad = personasSugeridas.value.length
+    if (!cantidad) return
+    personaActiva.value = personaActiva.value < 0
+      ? (evento.key === 'ArrowDown' ? 0 : cantidad - 1)
+      : (personaActiva.value + (evento.key === 'ArrowDown' ? 1 : -1) + cantidad) % cantidad
+    void nextTick(() => document.getElementById(`persona-opcion-${personaActiva.value}`)
+      ?.scrollIntoView({ block: 'nearest' }))
+  } else if (evento.key === 'Enter' && sugerenciasAbiertas.value) {
+    evento.preventDefault()
+    const persona = personasSugeridas.value[personaActiva.value]
+    if (persona) seleccionarPersona(persona)
+  }
+}
 
 // --- Modal de roles ---
 const mostrarRoles = ref(false)
@@ -73,6 +127,9 @@ async function cargarTodo() {
 function nuevo() {
   editando.value = null
   form.value = { username: '', password: '', idPersona: '' }
+  busquedaPersona.value = ''
+  sugerenciasAbiertas.value = false
+  personaActiva.value = -1
   errorForm.value = ''
   mostrarModal.value = true
 }
@@ -80,12 +137,20 @@ function nuevo() {
 function editar(u: UsuarioDetalleDto) {
   editando.value = u.idUsuario
   form.value = { username: u.username, password: '', idPersona: u.idPersona }
+  const persona = personas.value.find((p) => p.idPersona === u.idPersona)
+  busquedaPersona.value = persona ? etiquetaPersona(persona) : u.nombreCompleto
+  sugerenciasAbiertas.value = false
+  personaActiva.value = -1
   errorForm.value = ''
   mostrarModal.value = true
 }
 
 async function guardar() {
   errorForm.value = ''
+  if (!form.value.idPersona) {
+    errorForm.value = 'Seleccioná una persona de las sugerencias antes de guardar.'
+    return
+  }
   try {
     if (editando.value) {
       await actualizarUsuario(editando.value, form.value)
@@ -225,13 +290,43 @@ onMounted(cargarTodo)
       @cerrar="mostrarModal = false"
     >
       <form id="form-usuario" @submit.prevent="guardar">
-        <label>Persona *</label>
-        <select v-model="form.idPersona" required>
-          <option value="" disabled>Seleccione una persona</option>
-          <option v-for="p in personas" :key="p.idPersona" :value="p.idPersona">
-            {{ p.nombreCompleto }} — CI {{ p.ci }}
-          </option>
-        </select>
+        <label for="usuario-persona">Persona *</label>
+        <div class="persona-autocompletado">
+          <input
+            id="usuario-persona"
+            v-model="busquedaPersona"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls="personas-sugerencias"
+            :aria-expanded="sugerenciasAbiertas"
+            :aria-activedescendant="sugerenciasAbiertas && personaActiva >= 0 ? `persona-opcion-${personaActiva}` : undefined"
+            autocomplete="off"
+            placeholder="Buscar por nombre o CI…"
+            required
+            @input="buscarPersona"
+            @focus="sugerenciasAbiertas = true"
+            @blur="sugerenciasAbiertas = false"
+            @keydown="tecladoPersona"
+          />
+          <ul v-if="sugerenciasAbiertas" id="personas-sugerencias" role="listbox" aria-label="Personas" class="persona-sugerencias">
+            <li
+              v-for="(p, indice) in personasSugeridas"
+              :id="`persona-opcion-${indice}`"
+              :key="p.idPersona"
+              role="option"
+              :aria-selected="form.idPersona === p.idPersona"
+              :class="{ activa: personaActiva === indice }"
+              @mousedown.prevent
+              @click="seleccionarPersona(p)"
+            >
+              {{ etiquetaPersona(p) }}
+            </li>
+            <li v-if="!personasSugeridas.length" role="presentation" class="sin-resultados">
+              No se encontraron personas.
+            </li>
+          </ul>
+        </div>
+        <small class="persona-ayuda">Escribí el nombre o CI y seleccioná una sugerencia. Se muestran hasta 20 coincidencias.</small>
 
         <label>Username *</label>
         <input v-model="form.username" required />
@@ -294,3 +389,28 @@ onMounted(cargarTodo)
     </ModalBase>
   </div>
 </template>
+
+<style scoped>
+.persona-autocompletado { position: relative; }
+.persona-sugerencias {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: white;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px #0002;
+}
+.persona-sugerencias li { padding: 10px 12px; cursor: pointer; }
+.persona-sugerencias li.activa,
+.persona-sugerencias li[role="option"]:hover { background: #eff6ff; }
+.persona-sugerencias .sin-resultados { color: var(--texto-suave); cursor: default; }
+.persona-ayuda { display: block; margin-top: 6px; color: var(--texto-suave); }
+</style>

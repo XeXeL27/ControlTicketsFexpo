@@ -33,6 +33,13 @@ public class TicketController {
     private final TicketService ticketService;
     private final QrGenerator qrGenerator;
 
+    @PostMapping("/emitir-docente")
+    @Operation(summary = "Emitir el ticket de un docente ya cargado")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> emitirDocente(@RequestParam Long idDocente) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ticketService.emitirDocente(idDocente));
+    }
+
     @GetMapping("/listar")
     @Operation(summary = "Listar tickets emitidos")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")

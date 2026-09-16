@@ -9,4 +9,5 @@ public class ValidacionRequestDto {
 
     @NotBlank(message = "El codigo del ticket es obligatorio")
     private String codigo;
+    private com.uap.control_tickets.enums.TipoAcceso tipo;
 }

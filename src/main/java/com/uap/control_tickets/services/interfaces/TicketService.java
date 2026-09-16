@@ -10,6 +10,7 @@ import java.util.List;
 
 /** Contrato de emisión y generación de tickets. */
 public interface TicketService {
+    TicketDetalleDto emitirDocente(Long idDocente);
 
     List<TicketDetalleDto> listar();
 

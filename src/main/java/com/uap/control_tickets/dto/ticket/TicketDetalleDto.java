@@ -27,4 +27,5 @@ public class TicketDetalleDto {
     private String facultad;
     private String carrera;
     private String codigoAdministrativo;
+    private String codigoDocente;
 }

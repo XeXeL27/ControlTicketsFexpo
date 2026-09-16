@@ -42,7 +42,7 @@ public class ControlController {
                     + "Si el estudiante no esta matriculado, el ingreso se bloquea (409).")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<ValidacionTicketDto> validar(@Valid @RequestBody ValidacionRequestDto request) {
-        ValidacionTicketDto dto = controlService.validar(request.getCodigo());
+        ValidacionTicketDto dto = controlService.validar(request.getCodigo(), request.getTipo());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
         return ResponseEntity.status(estado).body(dto);
     }
@@ -51,6 +51,7 @@ public class ControlController {
     @Operation(summary = "Personas que estan actualmente dentro del recinto")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
     public ResponseEntity<List<PersonaDentroDto>> personasDentro() {
-        return ResponseEntity.ok(controlService.personasDentro());
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(controlService.personasDentro());
     }
 }

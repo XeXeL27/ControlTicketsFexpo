@@ -19,6 +19,11 @@ export function emitirTicketEstudiante(idEstudiante: number) {
     .then((r) => r.data)
 }
 
+export function emitirTicketDocente(idDocente: number) {
+  return http.post<TicketDetalleDto>('/tickets/emitir-docente', null, { params: { idDocente } })
+    .then((r) => r.data)
+}
+
 export function emitirTicketAdministrativo(idAdministrativo: number) {
   return http
     .post<TicketDetalleDto>('/tickets/emitir-administrativo', null, { params: { idAdministrativo } })

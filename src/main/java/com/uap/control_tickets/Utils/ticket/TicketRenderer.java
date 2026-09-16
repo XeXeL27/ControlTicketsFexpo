@@ -27,6 +27,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Rellena la plantilla del ticket de estudiante con los datos + el QR y la
@@ -167,6 +168,105 @@ public class TicketRenderer {
      * el ticket salga impreso exactamente del tamano fisico que pide la imprenta.
      */
     public byte[] pdfPliegoEstudiantes(List<DatosTicketEstudiante> tickets, FormatoPliego formato) {
+        return pdfPliego(tickets, formato, datos -> jpegParaImpresion(datos, formato));
+    }
+
+    /** Solo reversos: datos a la izquierda y QR a la derecha, sin arte ni anversos. */
+    public byte[] pdfPliegoAdministrativos(List<DatosTicketAdministrativo> tickets, FormatoPliego formato) {
+        return pdfPliego(tickets, formato, datos -> {
+            try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                ImageIO.write(renderAdministrativo(datos, formato), "PNG", out);
+                return out.toByteArray();
+            } catch (IOException e) {
+                throw new NegocioException("No se pudo generar el reverso: " + e.getMessage());
+            }
+        });
+    }
+
+    public BufferedImage renderAdministrativo(DatosTicketAdministrativo datos, FormatoPliego formato) {
+        return renderReverso("ADMINISTRATIVO", new String[]{
+                "Nombre: " + mayus(datos.nombreCompleto()), "CI: " + mayus(datos.ci()),
+                "Código: " + mayus(datos.codigo())}, datos.qrContenido(), formato);
+    }
+
+    public BufferedImage renderDocente(DatosTicketDocente datos, FormatoPliego formato) {
+        return renderReverso("DOCENTE", new String[]{
+                "Nombre: " + mayus(datos.nombreCompleto()), "CI: " + mayus(datos.ci()),
+                "Código docente: " + mayus(datos.codigoDocente()),
+                "Carrera: " + mayus(datos.carrera()), "Ticket: " + mayus(datos.codigoTicket())
+        }, datos.qrContenido(), formato);
+    }
+
+    public byte[] pdfPliegoDocentes(List<DatosTicketDocente> tickets, FormatoPliego formato) {
+        return pdfPliego(tickets, formato, datos -> aPng(renderDocente(datos, formato)));
+    }
+
+    public byte[] pngDocente(DatosTicketDocente datos) {
+        return aPng(renderDocente(datos, FormatoPliego.MIXTO_8));
+    }
+
+    public byte[] pdfDocente(DatosTicketDocente datos) {
+        FormatoPliego formato = FormatoPliego.MIXTO_8;
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Document doc = new Document(new Rectangle(pt(formato.getLargoCm()), pt(formato.getAltoCm())),
+                    0, 0, 0, 0);
+            PdfWriter.getInstance(doc, out);
+            doc.open();
+            Image imagen = Image.getInstance(pngDocente(datos));
+            imagen.scaleAbsolute(pt(formato.getLargoCm()), pt(formato.getAltoCm()));
+            imagen.setAbsolutePosition(0, 0);
+            doc.add(imagen);
+            doc.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo generar el ticket docente: " + e.getMessage());
+        }
+    }
+
+    private byte[] aPng(BufferedImage imagen) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            ImageIO.write(imagen, "PNG", out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo generar el PNG del ticket: " + e.getMessage());
+        }
+    }
+
+    private BufferedImage renderReverso(String titulo, String[] lineas, String qrContenido,
+                                        FormatoPliego formato) {
+        int ancho = (int) Math.round(formato.getLargoCm() / 2.54 * DPI_IMPRESION);
+        int alto = (int) Math.round(formato.getAltoCm() / 2.54 * DPI_IMPRESION);
+        BufferedImage imagen = new BufferedImage(ancho, alto, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = imagen.createGraphics();
+        try {
+            activarCalidad(g);
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, ancho, alto);
+            int margen = (int) Math.round(0.4 / 2.54 * DPI_IMPRESION);
+            int ladoQr = (int) Math.round(3.2 / 2.54 * DPI_IMPRESION);
+            int xQr = ancho - margen - ladoQr;
+            int anchoTexto = xQr - 2 * margen;
+            g.setFont(ajustar(g, titulo, anchoTexto, margen, 36));
+            g.setColor(Color.BLACK);
+            g.drawString(titulo, margen, margen + g.getFontMetrics().getAscent());
+            int inicioDatos = 2 * margen + 12;
+            int fila = (alto - inicioDatos - margen) / lineas.length;
+            for (int i = 0; i < lineas.length; i++) {
+                g.setFont(ajustar(g, lineas[i], anchoTexto, fila, 42));
+                g.setColor(Color.BLACK);
+                FontMetrics fm = g.getFontMetrics();
+                int y = inicioDatos + i * fila;
+                g.drawString(lineas[i], margen, y + (fila - fm.getHeight()) / 2 + fm.getAscent());
+            }
+            g.drawImage(qrGenerator.generarImagen(qrContenido, ladoQr),
+                    xQr, (alto - ladoQr) / 2, null);
+        } finally {
+            g.dispose();
+        }
+        return imagen;
+    }
+
+    private <T> byte[] pdfPliego(List<T> tickets, FormatoPliego formato, Function<T, byte[]> render) {
         if (tickets == null || tickets.isEmpty()) {
             throw new NegocioException("No hay tickets para armar el pliego");
         }
@@ -181,7 +281,7 @@ public class TicketRenderer {
             for (int i = 0; i < tickets.size(); i++) {
                 int posicion = i % porHoja;
                 if (i > 0 && posicion == 0) doc.newPage();
-                colocar(lienzo, tickets.get(i), formato, posicion);
+                colocar(lienzo, Image.getInstance(render.apply(tickets.get(i))), formato, posicion);
             }
             doc.close();
             return out.toByteArray();
@@ -196,9 +296,8 @@ public class TicketRenderer {
      * El sistema de coordenadas del PDF tiene el origen ABAJO a la izquierda, por eso
      * las filas horizontales se cuentan restando desde el borde superior.
      */
-    private void colocar(PdfContentByte lienzo, DatosTicketEstudiante datos,
+    private void colocar(PdfContentByte lienzo, Image img,
                          FormatoPliego formato, int posicion) throws Exception {
-        Image img = Image.getInstance(jpegParaImpresion(datos, formato));
         float largo = pt(formato.getLargoCm());
         float alto = pt(formato.getAltoCm());
         float margen = pt(MARGEN_CM);

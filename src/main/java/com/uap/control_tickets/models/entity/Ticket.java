@@ -73,6 +73,10 @@ public class Ticket extends AuditoriaConfig {
     private Administrativo administrativo;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_docente")
+    private Docente docente;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_particular")
     private Particular particular;
 }

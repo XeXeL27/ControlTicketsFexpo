@@ -1,6 +1,10 @@
 package com.uap.control_tickets.services.impl;
 
 import com.uap.control_tickets.Utils.ticket.DatosTicketEstudiante;
+import com.uap.control_tickets.Utils.ticket.DatosTicketAdministrativo;
+import com.uap.control_tickets.Utils.ticket.DatosTicketDocente;
+import com.uap.control_tickets.models.entity.Docente;
+import com.uap.control_tickets.models.repository.DocenteDao;
 import com.uap.control_tickets.Utils.ticket.TicketRenderer;
 import com.uap.control_tickets.dto.ticket.EmisionMasivaDto;
 import com.uap.control_tickets.dto.ticket.ResumenImpresionDto;
@@ -46,6 +50,7 @@ public class TicketServiceImpl implements TicketService {
     private final TicketDao ticketDao;
     private final EstudianteDao estudianteDao;
     private final AdministrativoDao administrativoDao;
+    private final DocenteDao docenteDao;
     private final TicketRenderer ticketRenderer;
 
     /**
@@ -148,12 +153,11 @@ public class TicketServiceImpl implements TicketService {
     // -------------------------------------------------------------------------
 
     /**
-     * Por ahora solo la categoria ESTUDIANTE tiene plantilla de arte cargada.
-     * Las demas (ADMINISTRATIVO, EXTERNO) se pueden emitir y contar, pero todavia no
-     * se pueden imprimir hasta que llegue su arte.
+     * Estudiantes tienen arte; administrativos imprimen solo el reverso sin fondo.
      */
     private boolean plantillaDisponible(CategoriaTicket categoria) {
-        return categoria == CategoriaTicket.ESTUDIANTE;
+        return categoria == CategoriaTicket.ESTUDIANTE || categoria == CategoriaTicket.ADMINISTRATIVO
+                || categoria == CategoriaTicket.DOCENTE;
     }
 
     /**
@@ -242,7 +246,7 @@ public class TicketServiceImpl implements TicketService {
         if (!plantillaDisponible(categoria)) {
             throw new NegocioException(
                     "La plantilla de arte de " + categoria + " todavia no esta cargada; "
-                            + "por ahora solo se puede imprimir la categoria ESTUDIANTE.");
+                            + "se pueden imprimir estudiantes, administrativos y docentes.");
         }
 
         String c = filtroCarrera(categoria, carrera);
@@ -263,10 +267,20 @@ public class TicketServiceImpl implements TicketService {
             candidatos = candidatos.subList(0, cantidad);
         }
 
-        List<DatosTicketEstudiante> datos = candidatos.stream()
-                .map(this::datosEstudiante)
-                .toList();
-        byte[] pdf = ticketRenderer.pdfPliegoEstudiantes(datos, formato);
+        byte[] pdf;
+        if (categoria == CategoriaTicket.ADMINISTRATIVO) {
+            List<DatosTicketAdministrativo> datos = candidatos.stream()
+                    .map(t -> new DatosTicketAdministrativo(t.getPersona().getNombreCompleto(),
+                            t.getPersona().getCi(), t.getAdministrativo().getCodigoAdministrativo(),
+                            t.getQrToken()))
+                    .toList();
+            pdf = ticketRenderer.pdfPliegoAdministrativos(datos, formato);
+        } else if (categoria == CategoriaTicket.DOCENTE) {
+            pdf = ticketRenderer.pdfPliegoDocentes(candidatos.stream().map(this::datosDocente).toList(), formato);
+        } else {
+            pdf = ticketRenderer.pdfPliegoEstudiantes(candidatos.stream()
+                    .map(this::datosEstudiante).toList(), formato);
+        }
 
         // Solo se marcan DESPUES de que el PDF se genero bien: si algo falla a mitad
         // de camino, los tickets siguen pendientes y se pueden volver a intentar.
@@ -305,6 +319,25 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     @Transactional
+    public TicketDetalleDto emitirDocente(Long idDocente) {
+        Docente docente = docenteDao.findById(idDocente)
+                .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Docente no encontrado"));
+        var existente = ticketDao.findFirstByDocenteIdDocenteAndEstado(idDocente, EstadoRegistro.ACTIVO);
+        if (existente.isPresent()) return toDetalleDto(existente.get());
+
+        Ticket ticket = new Ticket();
+        ticket.setCategoria(CategoriaTicket.DOCENTE);
+        ticket.setPersona(docente.getPersona());
+        ticket.setDocente(docente);
+        ticket.setQrToken(nuevoQrToken());
+        ticket.setCodigoIdentificacion(nuevoCodigo("DOC", CategoriaTicket.DOCENTE));
+        ticket.setDentro(false);
+        return toDetalleDto(ticketDao.save(ticket));
+    }
+
+    @Override
+    @Transactional
     public TicketDetalleDto emitirAdministrativo(Long idAdministrativo) {
         Administrativo admin = administrativoDao.findById(idAdministrativo)
                 .filter(a -> a.getEstado() == EstadoRegistro.ACTIVO)
@@ -330,20 +363,34 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional(readOnly = true)
     public byte[] renderPng(Long idTicket) {
-        return ticketRenderer.pngEstudiante(datosEstudiante(buscarActivo(idTicket)));
+        Ticket ticket = buscarActivo(idTicket);
+        if (ticket.getCategoria() == CategoriaTicket.DOCENTE) {
+            return ticketRenderer.pngDocente(datosDocente(ticket));
+        }
+        return ticketRenderer.pngEstudiante(datosEstudiante(ticket));
     }
 
     @Override
     @Transactional(readOnly = true)
     public byte[] renderPdf(Long idTicket) {
-        return ticketRenderer.pdfEstudiante(datosEstudiante(buscarActivo(idTicket)));
+        Ticket ticket = buscarActivo(idTicket);
+        if (ticket.getCategoria() == CategoriaTicket.DOCENTE) {
+            return ticketRenderer.pdfDocente(datosDocente(ticket));
+        }
+        return ticketRenderer.pdfEstudiante(datosEstudiante(ticket));
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Arma los datos a imprimir a partir del ticket. Solo estudiante por ahora. */
+    private DatosTicketDocente datosDocente(Ticket t) {
+        return new DatosTicketDocente(t.getPersona().getNombreCompleto(), t.getPersona().getCi(),
+                t.getDocente().getCodigoDocente(), t.getDocente().getCarrera(),
+                t.getCodigoIdentificacion(), t.getQrToken());
+    }
+
+    /** Arma los datos a imprimir a partir del ticket de estudiante. */
     private DatosTicketEstudiante datosEstudiante(Ticket t) {
         if (t.getCategoria() != CategoriaTicket.ESTUDIANTE || t.getEstudiante() == null) {
             throw new NegocioException(
@@ -406,6 +453,10 @@ public class TicketServiceImpl implements TicketService {
         }
         if (t.getAdministrativo() != null) {
             dto.setCodigoAdministrativo(t.getAdministrativo().getCodigoAdministrativo());
+        }
+        if (t.getDocente() != null) {
+            dto.setCodigoDocente(t.getDocente().getCodigoDocente());
+            dto.setCarrera(t.getDocente().getCarrera());
         }
         return dto;
     }

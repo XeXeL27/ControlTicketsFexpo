@@ -17,6 +17,7 @@ public interface ControlService {
      * primero consulta SIGSE y, si no esta matriculado, bloquea el ingreso.
      */
     ValidacionTicketDto validar(String codigo);
+    ValidacionTicketDto validar(String codigo, com.uap.control_tickets.enums.TipoAcceso tipo);
 
     /** Personas que estan actualmente dentro del recinto (dentro=true). */
     List<PersonaDentroDto> personasDentro();
