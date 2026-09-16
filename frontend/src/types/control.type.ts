@@ -1,7 +1,10 @@
 // Refleja los DTOs del backend para el modulo de Control (validador de acceso).
 import type { CategoriaTicket } from '@/types/ticket.type'
 
-// --- Respuesta SIGSE (ApiResponseDto + EstudianteDto del backend) ---
+/** Escaner dedicado (coincide con TipoAcceso del backend). */
+export type TipoMovimiento = 'ENTRADA' | 'SALIDA'
+
+// --- Respuesta de matricula (ApiResponseDto + EstudianteDto del backend) ---
 
 export interface DatosSigseDto {
   vigencia?: string
@@ -51,8 +54,10 @@ export interface ValidacionTicketDto {
   codigoIdentificacion: string
   /** true = la persona quedo dentro del recinto tras este escaneo. */
   dentro: boolean
-  /** true = el ingreso fue denegado (estudiante no matriculado). */
+  /** true = el movimiento fue denegado (duplicado o estudiante no matriculado). */
   bloqueado: boolean
+  /** Motivo del rechazo: YA_DENTRO, YA_FUERA o NO_MATRICULADO. */
+  motivo?: 'YA_DENTRO' | 'YA_FUERA' | 'NO_MATRICULADO'
   mensaje?: string
   nombreCompleto: string
   ci: string
@@ -60,7 +65,7 @@ export interface ValidacionTicketDto {
   carrera?: string
   facultad?: string
   codigoAdministrativo?: string
-  /** Respuesta de SIGSE (solo estudiantes). */
+  /** Respuesta de la consulta de matricula (solo estudiantes). */
   sigse?: RespuestaSigseDto | null
   /** Solo estudiantes: true/false segun estado_matriculacion. */
   matriculado?: boolean | null
