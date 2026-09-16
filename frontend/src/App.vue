@@ -110,6 +110,8 @@ function cerrarSesion(): void {
         <router-link to="/control">Control de acceso</router-link>
         <router-link to="/personas-dentro">Personas dentro</router-link>
         <router-link to="/reportes/personas">Reporte de accesos</router-link>
+        <router-link to="/control-boletos">Control de boletos</router-link>
+        <router-link to="/boletos">Boletos</router-link>
         <router-link to="/estudiantes">Estudiantes</router-link>
         <router-link to="/administrativos">Administrativos</router-link>
         <router-link to="/docentes">Docentes</router-link>

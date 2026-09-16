@@ -13,7 +13,9 @@ import Entrega from '@/views/Entrega.vue'
 import Personas from '@/views/Personas.vue'
 import Usuarios from '@/views/Usuarios.vue'
 import Roles from '@/views/Roles.vue'
+import Boletos from '@/views/Boletos.vue'
 import ControlValidador from '@/views/control/ControlValidador.vue'
+import ControlBoletos from '@/views/control/ControlBoletos.vue'
 import PersonasDentro from '@/views/control/PersonasDentro.vue'
 import ReportePersonas from '@/views/control/ReportePersonas.vue'
 
@@ -23,6 +25,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/control', component: ControlValidador },
   { path: '/personas-dentro', component: PersonasDentro },
   { path: '/reportes/personas', component: ReportePersonas },
+  { path: '/control-boletos', component: ControlBoletos },
+  { path: '/boletos', component: Boletos },
   { path: '/estudiantes', component: Estudiantes },
   { path: '/administrativos', component: Administrativos },
   { path: '/docentes', component: Docentes },
