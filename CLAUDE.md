@@ -184,17 +184,31 @@ Hecho:
   hojas como alternativa. El PDF sale en el orden en que se ve la tabla (clic en un
   encabezado para ordenar). Barra superior y menú fijos: solo scrollea el contenido.
 
+- **Módulo CONTROL (escáner) listo** (mergeado desde la rama `control`):
+  `ControlController` (`/api/control`) + `ControlServiceImpl` + vista
+  `views/control/ControlValidador.vue` (ruta `/control`, componentes `PanelEscaneo`
+  y `ConsultaRu`). **Escáneres dedicados**: cada escáner es de ENTRADA o de SALIDA
+  (`tipoMovimiento`), no alterna solo. Reglas en `validar()` (`@Transactional`):
+  - Busca el ticket por `qrToken` en la BD local (404 si no existe).
+  - "Anti-clones": ENTRADA estando `dentro` → `YA_DENTRO`; SALIDA estando fuera →
+    `YA_FUERA`. Responde **409** con `ValidacionTicketDto` (`bloqueado=true`,
+    `motivo`) y **no escribe nada**.
+  - Solo **ESTUDIANTE al ENTRAR** consulta la matrícula en **SIGSE** (API externa de
+    la UAP); si no está matriculado → 409 `NO_MATRICULADO`. Si SIGSE no responde →
+    `NegocioException` (400): la entrada queda bloqueada. La SALIDA no consulta SIGSE.
+  - Si pasa: `Ticket.dentro` = (tipo == ENTRADA) + fila en `Acceso`.
+  - Integración SIGSE en el paquete **`apivalidacaion`** (sic, así se llama):
+    `ApiService` hace POST con header `x-api-key` a `sigse.url`/`sigse.api-key`
+    (`SigseProperties`, `RestTemplate`).
+
 Pendiente:
 - **Arte (plantillas PNG) de administrativo y particular** + generalizar
   `TicketRenderer` (hoy `pdfPliegoEstudiantes`/`DatosTicketEstudiante` tienen
   incrustada la de estudiante) y poner `plantillaDisponible()` en `true` para ellas.
 - **Flujo de particular/externo** (venta manual): NO existe emisión (`emitirParticular`)
   ni pantalla todavía. La pestaña Particulares en Impresión ya está, pero sin tickets.
-- Endpoint de **escaneo**: registrar ENTRADA/SALIDA por `qrToken` y alternar el
-  flag `Ticket.dentro`. Es lo único que usa el rol CONTROL (ya creado en la BD)
-  y la entidad `Acceso` (ya creada, todavía sin escrituras).
-- **Monitoreo en tiempo real**: lo tomarán otros colaboradores. Decisión pendiente
-  entre SSE (push) o polling.
+- **Monitoreo en tiempo real**: ya existe `GET /api/control/dentro` (lista de
+  quienes tienen `dentro=true`), pero sin push. Decisión pendiente entre SSE o polling.
 
 ---
 
@@ -293,6 +307,9 @@ Utils/         Utilidades sin estado (ojo: U mayúscula, es el nombre real del p
                DatosTicketEstudiante (los campos que se imprimen).
   csv/         CsvUtils (codificación/separador/BOM/normalización del CSV, compartido
                por las importaciones de estudiante y administrativo).
+apivalidacaion/  Cliente de SIGSE (matrícula por RU). Rompe la convención: su propio
+               controller (`Api`), `Service/` y `Dto/` con mayúscula, sin interface.
+controllers/control/  ControlController (escáner). services: ControlService(Impl).
 ```
 
 **El prefijo `/api` NO se escribe en los controllers**: `WebConfig` se lo agrega a
@@ -360,7 +377,7 @@ Otros comandos de build/verificación (Maven wrapper):
 ```
 ./mvnw compile          # verificación rápida de compilación
 ./mvnw clean package    # construye el jar
-./mvnw test             # NO hay tests todavía: src/test ni siquiera existe.
+./mvnw test             # NO hay tests todavía: src/test/java existe pero está vacío.
                         # Para correr un test suelto una vez que existan:
                         #   ./mvnw test -Dtest=NombreDeLaClase#nombreDelMetodo
 ```
@@ -446,6 +463,10 @@ Claves importantes del perfil `jarv`:
 - `ddl-auto=update` (Hibernate crea/actualiza tablas en desarrollo).
 - Backend `server.port=9600`, CORS permite `http://localhost:5900`.
 - `app.admin.username` / `app.admin.password`: credenciales del admin inicial.
+- `sigse.url` / `sigse.api-key`: API de matrícula. Sin ellas el escáner no deja
+  entrar a ningún estudiante. ⚠️ Hoy están escritas en el `application.properties`
+  **base, que sí está en git** (desde el commit `cfc8aa2`), a diferencia del resto de
+  secretos; lo correcto sería moverlas al properties local o a variables de entorno.
 
 ---
 
@@ -524,6 +545,19 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
 codificación detectada, el separador, si hubo encabezado, cuántas filas son altas y
 cuántas actualizaciones, más las primeras 15 filas ya parseadas. Alimenta la vista
 previa de las pantallas de estudiantes y administrativos.
+
+**Control / escáner** (ADMINISTRADOR + CONTROL) — `/api/control`
+- `POST /validar` — body `{ codigo (qrToken), tipoMovimiento: ENTRADA|SALIDA }`.
+  200 si registró; **409** con `ValidacionTicketDto` (`motivo` = `YA_DENTRO` |
+  `YA_FUERA` | `NO_MATRICULADO`) si se rechazó. El frontend lee el 409 desde
+  `error.response.data` (el comentario de `control.service.ts` todavía dice 400 para
+  los duplicados; el backend manda 409).
+- `GET /dentro` — personas con `dentro=true`.
+- `GET /sigse/{ru}` — consulta de matrícula en SIGSE sin tocar la BD (siempre
+  devuelve los datos, matriculado o no).
+- `GET /api/validacion/informacion/{ru}` — controller `Api` del paquete
+  `apivalidacaion`, versión anterior de la misma consulta (409 si no matriculado).
+  **No tiene `@PreAuthorize`**: cualquier usuario logueado puede consultar.
 
 **QR y demo** (ADMINISTRADOR + CONTROL)
 - `GET /api/qr/generar?contenido=&tamano=` → PNG del QR (utilidad de prueba).
@@ -634,7 +668,8 @@ histórico completo queda en `Acceso`.
 ### Pendiente
 Emisión y relleno del ticket para **administrativo** y **particular** (falta el arte
 PNG + generalizar `TicketRenderer`), emisión/pantalla de **particular** (venta manual,
-no existe aún), endpoint de **escaneo** y **monitoreo**. Ver sección 2.
+no existe aún) y **monitoreo en tiempo real** (push). Ver sección 2.
+Ya hecho también: escáner ENTRADA/SALIDA con validación SIGSE (escribe en `Acceso`).
 Ya hecho: emisión estudiante y administrativo (código + QR), relleno PNG→PDF de
 estudiante, impresión por categoría.
 
