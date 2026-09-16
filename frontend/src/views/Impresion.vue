@@ -78,7 +78,10 @@ const FORMATOS: { valor: FormatoPliego; nombre: string; detalle: string }[] = [
   },
 ]
 
-const formatoActual = computed(() => FORMATOS.find((f) => f.valor === formato.value)!)
+const formatoImpresion = computed<FormatoPliego>(() => categoria.value === 'ADMINISTRATIVO' ? 'ADMINISTRATIVO_5' : formato.value)
+const formatoActual = computed(() => categoria.value === 'ADMINISTRATIVO'
+  ? { detalle: '5 por hoja: reversos de 20,8 × 7,42 cm apilados hacia abajo, sin separación.' }
+  : FORMATOS.find((f) => f.valor === formatoImpresion.value)!)
 
 /** Columnas según la categoría: cada una imprime datos distintos. */
 const columnas = computed<ColumnaTabla[]>(() => {
@@ -180,7 +183,7 @@ const puedeImprimir = computed(() => resumen.value?.plantillaDisponible ?? false
 async function cargar() {
   cargando.value = true
   try {
-    const [r, t] = await Promise.all([resumenImpresion(formato.value, categoria.value, carreraSel.value), listarTickets()])
+    const [r, t] = await Promise.all([resumenImpresion(formatoImpresion.value, categoria.value, carreraSel.value), listarTickets()])
     resumen.value = r
     // Por idTicket: sin orden elegido, la tabla muestra el mismo orden que usa el backend.
     tickets.value = [...t].sort((a, b) => a.idTicket - b.idTicket)
@@ -194,7 +197,7 @@ async function cargar() {
 /** Solo hace falta recalcular el resumen (medidas/conteos de la categoría). */
 async function recalcularResumen() {
   try {
-    resumen.value = await resumenImpresion(formato.value, categoria.value, carreraSel.value)
+    resumen.value = await resumenImpresion(formatoImpresion.value, categoria.value, carreraSel.value)
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al recalcular'))
   }
@@ -238,7 +241,7 @@ async function imprimir(todos: boolean) {
   generandoInfo.value = `Armando ${n} ticket(s) en ${h} hoja(s). Puede tardar unos segundos.`
   try {
     const blob = await generarPliego({
-      formato: formato.value,
+      formato: formatoImpresion.value,
       categoria: categoria.value,
       carrera: carreraSel.value || undefined,
       cantidad: todos ? undefined : n,
@@ -255,20 +258,27 @@ async function imprimir(todos: boolean) {
 }
 
 /** Vuelve a bajar un pliego SIN marcar nada (por si se perdio el archivo). */
-async function regenerarSinMarcar() {
+async function regenerarSinMarcar(soloPrimeraHoja = false) {
+  if (generando.value || !resumen.value?.total || !puedeImprimir.value) return
+  const cantidad = soloPrimeraHoja ? resumen.value.porHoja : undefined
   generando.value = true
-  generandoInfo.value = `Armando ${resumen.value?.total ?? ''} ticket(s). Puede tardar unos segundos.`
+  generandoInfo.value = soloPrimeraHoja
+    ? 'Armando la primera hoja para imprimir.'
+    : `Armando ${resumen.value.total} ticket(s). Puede tardar unos segundos.`
   try {
     const blob = await generarPliego({
-      formato: formato.value,
+      formato: formatoImpresion.value,
       categoria: categoria.value,
       carrera: carreraSel.value || undefined,
       orden: idsEnOrden.value,
       soloPendientes: false,
       marcar: false,
+      cantidad,
     })
-    descargar(blob, nombreArchivo('completo'))
-    alertas.info(`Pliego con TODOS los tickets de ${ambito.value}. No se cambió ninguna marca.`)
+    descargar(blob, nombreArchivo(soloPrimeraHoja ? 'primera-hoja' : 'completo'))
+    alertas.info(soloPrimeraHoja
+      ? 'Primera hoja lista para imprimir. No se cambió ninguna marca.'
+      : `Pliego con TODOS los tickets de ${ambito.value}. No se cambió ninguna marca.`)
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al regenerar el pliego'))
   } finally {
@@ -304,7 +314,7 @@ async function reiniciar() {
 
 /** Nombre del PDF: pliego-estudiante[-carrera]-formato-sufijo.pdf, sin tildes ni espacios. */
 function nombreArchivo(sufijo: string) {
-  const partes = ['pliego', categoria.value, carreraSel.value, formato.value, sufijo]
+  const partes = ['pliego', categoria.value, carreraSel.value, formatoImpresion.value, sufijo]
   const base = partes
     .filter(Boolean)
     .join('-')
@@ -413,11 +423,16 @@ onMounted(cargar)
         con el QR a la derecha. Imprimir a tamaño real (100%).
       </Alerta>
       <Alerta v-if="categoria === 'ADMINISTRATIVO'" tipo="info">
-        Solo se imprime el reverso, sin diseño de fondo y con las mismas medidas que
-        estudiantes. Dos columnas: nombre, CI y código administrativo a la izquierda;
-        QR a la derecha. Imprimir sobre la parte de atrás del ticket, a tamaño real (100%).
+        Solo se imprime el reverso, sin diseño de fondo, de 20,8 cm de ancho × 7,42 cm de alto.
+        Cinco apilados sin separación en una hoja de 20,8 × 37,1 cm.
+        Talón izquierdo de 9 cm: 3,5 cm para datos verticales con letra pequeña
+        y nombres largos en dos líneas, sin QR, centrados a la altura del QR,
+        más 5,5 cm completamente vacíos a su derecha.
+        Sección principal derecha de 11,8 cm con datos y QR. Alineación a la derecha con margen de 2 mm.
+        El bloque principal está centrado
+        verticalmente en 3,2 cm de alto. Imprimir a tamaño real (100%).
       </Alerta>
-      <p style="color:var(--texto-suave);font-size:13px;margin:6px 0 14px">
+      <p v-if="categoria !== 'ADMINISTRATIVO'" style="color:var(--texto-suave);font-size:13px;margin:6px 0 14px">
         Hoja oficio de 21.5 x 33 cm en vertical. El PDF sale en tamaño real,
         listo para mandar a imprimir.
       </p>
@@ -428,7 +443,7 @@ onMounted(cargar)
       </p>
 
       <label>Formato del pliego</label>
-      <select v-model="formato" @change="recalcularResumen" style="max-width:420px">
+      <select v-model="formato" v-if="categoria !== 'ADMINISTRATIVO'" @change="recalcularResumen" style="max-width:420px">
         <option v-for="f in FORMATOS" :key="f.valor" :value="f.valor">{{ f.nombre }}</option>
       </select>
       <p style="color:var(--texto-suave);font-size:12px;margin:6px 0 14px">
@@ -436,6 +451,15 @@ onMounted(cargar)
       </p>
 
       <!-- Opción principal: todo lo que falta, de una vez -->
+      <button class="secundario" style="margin-bottom:12px"
+        :disabled="generando || !resumen?.total || !puedeImprimir"
+        @click="regenerarSinMarcar(true)">
+        Imprimir solo la primera hoja (sin marcar)
+      </button>
+      <p style="color:var(--texto-suave);font-size:13px;margin:0 0 12px">
+        Descarga un PDF de una sola hoja con los primeros tickets según el orden elegido,
+        aunque ya estén impresos. Ideal para comprobar las medidas.
+      </p>
       <button :disabled="generando || !resumen?.pendientes || !puedeImprimir" @click="imprimir(true)">
         {{ generando ? 'Generando...' : `Imprimir todos los no impresos (${resumen?.pendientes ?? 0})` }}
       </button>
@@ -469,7 +493,7 @@ onMounted(cargar)
       </div>
 
       <div class="acciones" style="margin-top:16px;flex-wrap:wrap">
-        <button class="secundario" :disabled="generando || !resumen?.total || !puedeImprimir" @click="regenerarSinMarcar">
+        <button class="secundario" :disabled="generando || !resumen?.total || !puedeImprimir" @click="regenerarSinMarcar()">
           Descargar todos (sin marcar)
         </button>
         <button class="secundario" :disabled="!impresosCategoria" @click="reiniciar">

@@ -29,7 +29,10 @@ public enum FormatoPliego {
      * estira ~11%. Respetando el alto de 6 cm el largo fiel seria 18.05 cm, y
      * entran los mismos 5 por hoja.
      */
-    HORIZONTAL_5(20.0, 6.0, 5);
+    HORIZONTAL_5(20.0, 6.0, 5),
+
+    /** Administrativos: cinco reversos de 20.8 x 7.42 cm, sin separación. */
+    ADMINISTRATIVO_5(20.8, 7.42, 5);
 
     /** Largo del ticket en centimetros (su lado mayor). */
     private final double largoCm;

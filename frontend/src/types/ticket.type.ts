@@ -38,7 +38,7 @@ export interface EmisionMasivaDto {
 }
 
 // --- Impresion por tandas ---
-export type FormatoPliego = 'MIXTO_8' | 'HORIZONTAL_5'
+export type FormatoPliego = 'MIXTO_8' | 'HORIZONTAL_5' | 'ADMINISTRATIVO_5'
 
 /** Categorías de ticket (EXTERNO = particular). Coincide con CategoriaTicket del backend. */
 export type CategoriaTicket = 'ESTUDIANTE' | 'ADMINISTRATIVO' | 'DOCENTE' | 'EXTERNO'

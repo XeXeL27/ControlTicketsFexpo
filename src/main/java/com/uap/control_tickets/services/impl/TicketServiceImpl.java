@@ -176,6 +176,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional(readOnly = true)
     public ResumenImpresionDto resumenImpresion(FormatoPliego formato, CategoriaTicket categoria, String carrera) {
+        formato = formatoParaCategoria(formato, categoria);
         String c = filtroCarrera(categoria, carrera);
         long impresos = c == null
                 ? ticketDao.countByCategoriaAndImpresoAndEstado(categoria, true, EstadoRegistro.ACTIVO)
@@ -243,6 +244,7 @@ public class TicketServiceImpl implements TicketService {
     public byte[] generarPliego(FormatoPliego formato, CategoriaTicket categoria, String carrera,
                                 Integer cantidad, boolean soloPendientes, boolean marcar,
                                 List<Long> orden) {
+        formato = formatoParaCategoria(formato, categoria);
         if (!plantillaDisponible(categoria)) {
             throw new NegocioException(
                     "La plantilla de arte de " + categoria + " todavia no esta cargada; "
@@ -396,6 +398,14 @@ public class TicketServiceImpl implements TicketService {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private FormatoPliego formatoParaCategoria(FormatoPliego formato, CategoriaTicket categoria) {
+        if (categoria == CategoriaTicket.ADMINISTRATIVO) return FormatoPliego.ADMINISTRATIVO_5;
+        if (formato == FormatoPliego.ADMINISTRATIVO_5) {
+            throw new NegocioException("El formato ADMINISTRATIVO_5 es exclusivo de administrativos");
+        }
+        return formato;
+    }
 
     private DatosTicketDocente datosDocente(Ticket t) {
         return new DatosTicketDocente(t.getPersona().getNombreCompleto(), t.getPersona().getCi(),

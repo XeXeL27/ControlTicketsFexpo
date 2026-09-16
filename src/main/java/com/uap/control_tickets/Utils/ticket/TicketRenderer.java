@@ -130,6 +130,8 @@ public class TicketRenderer {
     /** Hoja OFICIO en vertical, en centimetros. */
     private static final double HOJA_ANCHO_CM = 21.5;
     private static final double HOJA_ALTO_CM = 33.0;
+    private static final double HOJA_ADMIN_ANCHO_CM = 20.8;
+    private static final double HOJA_ADMIN_ALTO_CM = 37.1;
     /** Margen de la hoja y separacion entre tickets, para que la imprenta pueda cortar. */
     private static final double MARGEN_CM = 0.3;
     private static final double SEPARACION_CM = 0.2;
@@ -173,7 +175,7 @@ public class TicketRenderer {
 
     /** Solo reversos: datos a la izquierda y QR a la derecha, sin arte ni anversos. */
     public byte[] pdfPliegoAdministrativos(List<DatosTicketAdministrativo> tickets, FormatoPliego formato) {
-        return pdfPliego(tickets, formato, datos -> {
+        return pdfPliego(tickets, FormatoPliego.ADMINISTRATIVO_5, datos -> {
             try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 ImageIO.write(renderAdministrativo(datos, formato), "PNG", out);
                 return out.toByteArray();
@@ -184,9 +186,73 @@ public class TicketRenderer {
     }
 
     public BufferedImage renderAdministrativo(DatosTicketAdministrativo datos, FormatoPliego formato) {
-        return renderReverso("ADMINISTRATIVO", new String[]{
+        String[] lineas = {
                 "Nombre: " + mayus(datos.nombreCompleto()), "CI: " + mayus(datos.ci()),
-                "Código: " + mayus(datos.codigo())}, datos.qrContenido(), formato);
+                "Código: " + mayus(datos.codigo())};
+        BufferedImage imagen = new BufferedImage(pixeles(20.8), pixeles(7.42), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = imagen.createGraphics();
+        try {
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, imagen.getWidth(), imagen.getHeight());
+            // Bloque de 3.2 cm de alto centrado en los 7.42 cm del ticket.
+            // Sin título: solo datos + QR (medidas y QR intactos).
+            int y = (imagen.getHeight() - pixeles(3.2)) / 2;
+            BufferedImage principal = renderReverso("", lineas, datos.qrContenido(), 11.8, 3.2, true);
+            // Girar solo el bloque principal 180° dentro de su misma área.
+            g.drawImage(principal, imagen.getWidth(), y + principal.getHeight(),
+                    -principal.getWidth(), -principal.getHeight(), null);
+            // Talón de 9 cm: 3.5 cm para datos y 5.5 cm vacíos a su derecha. Cuerpo de 11.8 cm.
+            dibujarTalonVertical(g, lineas, 0, imagen.getHeight());
+        } finally {
+            g.dispose();
+        }
+        return imagen;
+    }
+
+    /** Texto vertical en los primeros 3.5 cm del talón; sus 5.5 cm derechos quedan vacíos. */
+    private void dibujarTalonVertical(Graphics2D destino, String[] lineas, int inicioTalon, int alto) {
+        Graphics2D g = (Graphics2D) destino.create();
+        try {
+            activarCalidad(g);
+            int anchoTexto = alto - 2 * pixeles(0.4);
+            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
+            java.util.List<String> textos = new java.util.ArrayList<>();
+            // Sin la palabra "ADMINISTRATIVO": solo los datos del titular.
+            textos.addAll(dividirNombreTalon(lineas[0], g.getFontMetrics(), anchoTexto));
+            textos.add(lineas[1]);
+            textos.add(lineas[2]);
+            int paso = g.getFontMetrics().getAscent() + g.getFontMetrics().getDescent();
+            g.translate(inicioTalon + pixeles(3.5) - pixeles(0.2) - paso * textos.size(), alto - pixeles(0.4));
+            g.rotate(-Math.PI / 2);
+            g.setColor(Color.BLACK);
+            int y = 0;
+            for (String texto : textos) {
+                g.setFont(ajustar(g, texto, anchoTexto, paso, 28));
+                FontMetrics fm = g.getFontMetrics();
+                // Centrado en el largo del talón: así cada renglón queda centrado
+                // verticalmente en el ticket, a la altura del QR (que va centrado
+                // y no se toca). Medidas y QR intactos.
+                g.drawString(texto, (anchoTexto - fm.stringWidth(texto)) / 2, y + fm.getAscent());
+                // Solo ascenso y descenso: sin separación adicional entre renglones.
+                y += paso;
+            }
+        } finally {
+            g.dispose();
+        }
+    }
+
+    static List<String> dividirNombreTalon(String texto, FontMetrics fm, int ancho) {
+        if (fm.stringWidth(texto) <= ancho) return List.of(texto);
+        // Elegir el espacio que equilibra mejor las dos líneas, sin perder caracteres.
+        int corte = -1;
+        int mejorAncho = Integer.MAX_VALUE;
+        for (int i = 1; i < texto.length() - 1; i++) {
+            if (texto.charAt(i) != ' ') continue;
+            int mayor = Math.max(fm.stringWidth(texto.substring(0, i)), fm.stringWidth(texto.substring(i + 1)));
+            if (mayor < mejorAncho) { mejorAncho = mayor; corte = i; }
+        }
+        if (corte < 0) corte = texto.length() / 2;
+        return List.of(texto.substring(0, corte).stripTrailing(), texto.substring(corte).stripLeading());
     }
 
     public BufferedImage renderDocente(DatosTicketDocente datos, FormatoPliego formato) {
@@ -234,21 +300,36 @@ public class TicketRenderer {
 
     private BufferedImage renderReverso(String titulo, String[] lineas, String qrContenido,
                                         FormatoPliego formato) {
-        int ancho = (int) Math.round(formato.getLargoCm() / 2.54 * DPI_IMPRESION);
-        int alto = (int) Math.round(formato.getAltoCm() / 2.54 * DPI_IMPRESION);
+        return renderReverso(titulo, lineas, qrContenido, formato.getLargoCm(), formato.getAltoCm());
+    }
+
+    private int pixeles(double cm) {
+        return (int) Math.round(cm / 2.54 * DPI_IMPRESION);
+    }
+
+    private BufferedImage renderReverso(String titulo, String[] lineas, String qrContenido,
+                                        double anchoCm, double altoCm) {
+        return renderReverso(titulo, lineas, qrContenido, anchoCm, altoCm, false);
+    }
+
+    private BufferedImage renderReverso(String titulo, String[] lineas, String qrContenido,
+                                        double anchoCm, double altoCm, boolean derecha) {
+        int ancho = pixeles(anchoCm);
+        int alto = pixeles(altoCm);
         BufferedImage imagen = new BufferedImage(ancho, alto, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = imagen.createGraphics();
         try {
             activarCalidad(g);
             g.setColor(Color.WHITE);
             g.fillRect(0, 0, ancho, alto);
-            int margen = (int) Math.round(0.4 / 2.54 * DPI_IMPRESION);
+            int margen = pixeles(derecha ? 0.2 : 0.4);
             int ladoQr = (int) Math.round(3.2 / 2.54 * DPI_IMPRESION);
             int xQr = ancho - margen - ladoQr;
-            int anchoTexto = xQr - 2 * margen;
+            int anchoTexto = qrContenido == null ? ancho - 2 * margen : xQr - 2 * margen;
             g.setFont(ajustar(g, titulo, anchoTexto, margen, 36));
             g.setColor(Color.BLACK);
-            g.drawString(titulo, margen, margen + g.getFontMetrics().getAscent());
+            g.drawString(titulo, margen + (derecha ? anchoTexto - g.getFontMetrics().stringWidth(titulo) : 0),
+                    margen + g.getFontMetrics().getAscent());
             int inicioDatos = 2 * margen + 12;
             int fila = (alto - inicioDatos - margen) / lineas.length;
             for (int i = 0; i < lineas.length; i++) {
@@ -256,10 +337,13 @@ public class TicketRenderer {
                 g.setColor(Color.BLACK);
                 FontMetrics fm = g.getFontMetrics();
                 int y = inicioDatos + i * fila;
-                g.drawString(lineas[i], margen, y + (fila - fm.getHeight()) / 2 + fm.getAscent());
+                g.drawString(lineas[i], margen + (derecha ? anchoTexto - fm.stringWidth(lineas[i]) : 0),
+                        y + (fila - fm.getHeight()) / 2 + fm.getAscent());
             }
-            g.drawImage(qrGenerator.generarImagen(qrContenido, ladoQr),
-                    xQr, (alto - ladoQr) / 2, null);
+            if (qrContenido != null) {
+                g.drawImage(qrGenerator.generarImagen(qrContenido, ladoQr),
+                        xQr, (alto - ladoQr) / 2, null);
+            }
         } finally {
             g.dispose();
         }
@@ -270,7 +354,9 @@ public class TicketRenderer {
         if (tickets == null || tickets.isEmpty()) {
             throw new NegocioException("No hay tickets para armar el pliego");
         }
-        Rectangle hoja = new Rectangle(pt(HOJA_ANCHO_CM), pt(HOJA_ALTO_CM));
+        Rectangle hoja = formato == FormatoPliego.ADMINISTRATIVO_5
+                ? new Rectangle(pt(HOJA_ADMIN_ANCHO_CM), pt(HOJA_ADMIN_ALTO_CM))
+                : new Rectangle(pt(HOJA_ANCHO_CM), pt(HOJA_ALTO_CM));
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Document doc = new Document(hoja, 0, 0, 0, 0);
             PdfWriter writer = PdfWriter.getInstance(doc, out);
@@ -303,6 +389,16 @@ public class TicketRenderer {
         float margen = pt(MARGEN_CM);
         float sep = pt(SEPARACION_CM);
         float topeSuperior = pt(HOJA_ALTO_CM) - margen;
+
+        if (formato == FormatoPliego.ADMINISTRATIVO_5) {
+            // Cinco entradas cubren exactamente la hoja de 20.8 x 37.1 cm.
+            float x = 0;
+            float y = pt(HOJA_ADMIN_ALTO_CM - (posicion + 1) * formato.getAltoCm());
+            img.scaleAbsolute(largo, alto);
+            img.setAbsolutePosition(x, y);
+            lienzo.addImage(img);
+            return;
+        }
 
         if (posicion < formato.getHorizontales()) {
             // Fila horizontal: apiladas desde arriba hacia abajo.
