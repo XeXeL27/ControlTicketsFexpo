@@ -18,6 +18,7 @@ tickets con QR único y código de identificación**. Tres categorías de asiste
 |------------------|--------------------------|-----------------------------------------------------|
 | **Estudiante**   | Carga masiva por **CSV** | Nombre completo + **RU** + **CI** + carrera/facultad |
 | **Administrativo** | Carga masiva por **CSV** | Nombre completo + **CI** + **código administrativo** |
+| **Docente**      | Carga masiva por **CSV** | Nombre completo + **CI** + **código docente**        |
 | **Externo** (particular) | Manual (venta puntual) | Nombre completo + **CI**                       |
 
 Requisitos clave:
@@ -128,6 +129,36 @@ Hecho:
   encabezado por el CI numérico (el código puede no serlo). Pantalla con dropzone,
   vista previa, filtro con/sin ticket y "generar faltantes". Falta el arte del ticket.
 
+- **Docentes end-to-end (backend + pantalla): CALCADO de administrativo**. Entidad
+  `Docente` (`codigoDocente` único), CRUD + CSV (codificación/preview/reimport) +
+  emisión `DOC-000001…`, `Docentes.vue` (`/docentes`), pestaña en Impresión. CSV:
+  `codigo docente, nombre completo, ci`. Falta el arte del ticket (como administrativo).
+  > ⚠️ **CHECK constraint al sumar una categoría.** El enum `CategoriaTicket` se guarda
+  > como STRING y Hibernate le puso un CHECK (`ticket_categoria_check`) con los valores
+  > que existían al crear la tabla. `ddl-auto=update` **NO** actualiza ese CHECK, así
+  > que insertar un ticket de la categoría nueva falla con
+  > `violates check constraint "ticket_categoria_check"`. Hay que recrearlo a mano:
+  > `ALTER TABLE ticket DROP CONSTRAINT IF EXISTS ticket_categoria_check;`
+  > `ALTER TABLE ticket ADD CONSTRAINT ticket_categoria_check CHECK (categoria IN ('ESTUDIANTE','ADMINISTRATIVO','DOCENTE','EXTERNO'));`
+  > Ya aplicado en la BD local; **en producción (ddl-auto=validate) hay que correrlo al desplegar.**
+
+- **Control de ENTREGA de tickets**: marcar a quién se entregó el ticket físico. Campos
+  `Ticket.entregado` + `fechaEntrega` (quién marcó queda en la auditoría);
+  `PATCH /api/tickets/entrega?idTicket=&entregado=`. Pantalla **`Entrega.vue`**
+  (`/entrega`): resumen, buscador, filtros por categoría y por estado de entrega, y
+  botón marcar/deshacer por fila. Es un control aparte de la impresión (un ticket
+  puede estar impreso pero sin entregar).
+
+- **Emisión masiva por LOTES con barra de progreso** (`ProgresoModal`): "Generar
+  tickets" emite solo los que faltan y en lotes (estudiantes de a 25) para no colgar el
+  servidor. Antes, "todos" mandaba sin lista y el backend recorría los ~7000 en una
+  sola petición → timeout. La impresión muestra un modal indeterminado "Generando
+  pliego…" con la cantidad.
+  > ⚠️ **OOM al imprimir TODO de una categoría grande.** Armar un PDF con miles de
+  > tickets (JPEG 300 DPI) supera el límite de array de Java (~2 GB) y **tumba el
+  > backend** (`Required array length ... too large`). Imprimir por carrera/tanda anda
+  > bien. Pendiente: poner un tope al botón "imprimir todos".
+
 - **Toda la parte delicada del CSV extraída a `Utils/csv/CsvUtils`** (codificación
   UTF-8 estricto → windows-1252/CP850 por puntaje, separador, BOM, normalización,
   aviso de texto mal codificado). La comparten estudiante y administrativo; ya no
@@ -223,6 +254,11 @@ todos comentados en español):
   validación `.csv` + ficha del archivo. `v-model` con el `File`; emite `elegido`/
   `quitado`. Lo usan Estudiantes y Administrativos; el botón "Importar" va en su slot
   `#acciones`.
+- **`components/ProgresoModal.vue`** — modal de progreso para procesos largos (emisión
+  en lote, generación de PDF). Barra + "X de Y" + %, o `indeterminado` (barra animada
+  sin conteo) para procesos opacos como armar un PDF de una sola llamada. No se cierra
+  mientras corre. Para que el contador se vea subir, el proceso tiene que avanzar en
+  varios pasos (por eso la emisión va en lotes chicos).
 - **`utils/errores.ts` → `mensajeError(e, def)`** — saca el mensaje legible de un error
   de axios (`data.mensaje` o los `campos` de validación). Único, ya no duplicado.
 - Los **hosts globales** (`AlertasHost`, `ConfirmDialog`) están en `App.vue`, siempre
@@ -447,6 +483,10 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
   código). Devuelve `{totalFilas, creados, actualizados, errores}`.
 - `POST /previsualizar` — igual que estudiantes pero con columnas de administrativo.
 
+**Docentes** (ADMINISTRADOR) — `/api/docentes` — calcado de administrativos
+- `GET /listar` · `GET /obtener?idDocente=` · `POST /crear` · `DELETE /eliminar?idDocente=`
+- `POST /importar` · `POST /previsualizar` — CSV: `codigo docente, nombre completo, ci`.
+
 **Tickets** (ADMINISTRADOR + CONTROL en consultas; emisión e impresión solo ADMINISTRADOR) — `/api/tickets`
 - `GET /listar` · `GET /obtener?idTicket=`
 - `GET /{idTicket}/png` · `GET /{idTicket}/pdf` — rinden el ticket con datos de BD.
@@ -454,6 +494,9 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
   sirve para las categorías que todavía no tienen plantilla (administrativo).
 - `POST /emitir-estudiante?idEstudiante=` — **solo ADMINISTRADOR**; idempotente.
 - `POST /emitir-administrativo?idAdministrativo=` — **solo ADMINISTRADOR**; idempotente.
+- `POST /emitir-docente?idDocente=` — **solo ADMINISTRADOR**; idempotente (DOC-…).
+- `PATCH /entrega?idTicket=&entregado=` — **control de entrega física** del ticket
+  (marcar/desmarcar entregado + fechaEntrega). Devuelve el ticket actualizado.
 - `POST /emitir-estudiantes-masivo` — **solo ADMINISTRADOR**. Cuerpo opcional: una
   lista de ids; sin cuerpo emite para **todos** los estudiantes activos. Devuelve
   `{totalEstudiantes, emitidos, omitidos, errores}`. Ojo: el método del service
@@ -563,15 +606,19 @@ Estudiante        Administrativo            Particular
   carrera
   persona (FK)
 
+Docente  (mismo patrón que Administrativo)
+  idDocente · codigoDocente (único) · persona (FK)
+
 Ticket  (control de ingreso)
   idTicket (PK)
-  categoria             ESTUDIANTE | ADMINISTRATIVO | EXTERNO
+  categoria             ESTUDIANTE | ADMINISTRATIVO | DOCENTE | EXTERNO
   codigoIdentificacion  (único, legible: "CODIGO TICKETS" del diseño)
   qrToken               (único, UUID; contenido del QR)
   dentro                (boolean; estado actual para el monitoreo)
   impreso · fechaImpresion  (avance de la tirada en la imprenta, ver 8.1)
+  entregado · fechaEntrega  (control de entrega física del ticket)
   persona (FK)          -> nombre completo + CI
-  estudiante / administrativo / particular (FK opcionales; solo una según categoría)
+  estudiante / administrativo / docente / particular (FK opcionales; solo una según categoría)
   + auditoría / estado
 
 Acceso  (validación / log de escaneos)
@@ -647,3 +694,15 @@ estudiante, impresión por categoría.
 - Git: reproducido en un clon aislado el error "would be overwritten by merge:
   CLAUDE.md" y verificado que con `pull.rebase` + `autoStash` + `merge=union` el pull
   y `subir.sh` pasan sin error, incluso con un merge de PR en el medio.
+
+**Sesión 7 (categoría DOCENTE + control de entrega + progreso):**
+- Docente calcado de administrativo. Verificado: import CSV 2/2 con tildes, emisión
+  `DOC-000001`, resumen de impresión DOCENTE (plantillaDisponible=false).
+- Al emitir el primer ticket DOCENTE saltó `violates check constraint
+  "ticket_categoria_check"`; se recreó el CHECK con las 4 categorías (ver §2).
+- Control de entrega: `PATCH /api/tickets/entrega` + `Entrega.vue`. Verificado marcar
+  entregado (con fecha) y deshacer (fecha a null).
+- Emisión masiva por lotes con `ProgresoModal` (arregla el timeout del "emitir todos").
+- Diagnóstico: PDF de impresión con miles de tickets → OutOfMemory (~2 GB, límite de
+  array de Java). Imprimir por carrera/tanda anda; falta topar "imprimir todos".
+- `./mvnw compile` OK, `npm run build` OK.

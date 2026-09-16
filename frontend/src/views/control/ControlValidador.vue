@@ -1,151 +1,150 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import axios from 'axios'
-import EscannerQr from '@/components/EscannerQr.vue'
+// Modulo CONTROL: control de acceso con escaneres DEDICADOS.
+//
+// Cada panel (ENTRADA verde / SALIDA azul) arranca con su boton: solo al
+// pulsarlo se abre la camara (un solo escaner activo a la vez, para no pedir
+// las dos camaras). El backend rechaza los duplicados (entrar estando dentro /
+// salir estando fuera) y valida la matricula solo al entrar un estudiante.
+// Debajo, la lista de quienes estan actualmente dentro del recinto.
+import { onMounted, ref } from 'vue'
+import PanelEscaneo from '@/components/PanelEscaneo.vue'
+import TablaDatos from '@/components/TablaDatos.vue'
+import ConsultaRu from '@/components/ConsultaRu.vue'
+import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
-import { validarTicket } from '@/api/control.service'
-import type { ValidacionTicketDto } from '@/types/control.type'
-import type { CategoriaTicket } from '@/types/ticket.type'
+import { personasDentro } from '@/api/control.service'
+import type { PersonaDentroDto, TipoMovimiento } from '@/types/control.type'
 
-const categorias: { valor: CategoriaTicket; nombre: string }[] = [
-  { valor: 'ESTUDIANTE', nombre: 'Estudiantes' },
-  { valor: 'ADMINISTRATIVO', nombre: 'Administrativos' },
-  { valor: 'DOCENTE', nombre: 'Docentes' },
-  { valor: 'EXTERNO', nombre: 'Particulares' },
-]
-const modo = ref<'ENTRADA' | 'SALIDA'>('ENTRADA')
-const procesando = ref(false)
-const resultado = ref<ValidacionTicketDto | null>(null)
-const errorValidacion = ref('')
-const manual = ref('')
-const paginaVisible = ref(!document.hidden)
-let ultimoCodigo = ''
-let ultimoMomento = 0
+const alertas = useAlertas()
 
-function cambiarModo(tipo: 'ENTRADA' | 'SALIDA') {
-  modo.value = tipo
-  ultimoCodigo = ''
-  resultado.value = null
-  errorValidacion.value = ''
+/** Cual panel tiene la camara abierta (solo uno a la vez). */
+const activo = ref<TipoMovimiento | null>(null)
+
+/** Referencias a los paneles para poder limpiar el resultado del otro. */
+const refEntrada = ref<InstanceType<typeof PanelEscaneo> | null>(null)
+const refSalida = ref<InstanceType<typeof PanelEscaneo> | null>(null)
+
+/** Modal de consulta puntual de matricula por RU. */
+const mostrarConsultaRu = ref(false)
+
+const dentro = ref<PersonaDentroDto[]>([])
+const cargandoDentro = ref(false)
+
+function abrir(tipo: TipoMovimiento): void {
+  // Al abrir un escaner se limpia el resultado del otro, para que cada
+  // escaneo arranque limpio y no queden datos de la operacion anterior.
+  if (tipo === 'ENTRADA') refSalida.value?.limpiar()
+  else refEntrada.value?.limpiar()
+  activo.value = tipo
 }
-function alCodigoLeido(codigo: string) {
-  const limpio = codigo.trim()
-  if (!limpio || procesando.value) return
-  // Mantener un QR ante la cámara no debe generar solicitudes repetidas.
-  const ahora = Date.now()
-  const repetido = limpio === ultimoCodigo && ahora - ultimoMomento < 2500
-  ultimoCodigo = limpio
-  ultimoMomento = ahora
-  if (!repetido) void procesar(limpio)
-}
-async function procesar(codigo: string) {
-  if (procesando.value || !codigo.trim()) return
-  procesando.value = true
-  resultado.value = null
-  errorValidacion.value = ''
+
+async function cargarDentro(): Promise<void> {
+  cargandoDentro.value = true
   try {
-    resultado.value = await validarTicket(codigo.trim(), modo.value)
-    manual.value = ''
+    dentro.value = await personasDentro()
   } catch (e) {
-    if (axios.isAxiosError(e) && e.response?.status === 409 && e.response.data?.bloqueado === true) {
-      resultado.value = e.response.data as ValidacionTicketDto
-    } else {
-      errorValidacion.value = mensajeError(e, 'No se pudo confirmar el movimiento. Revisá el seguimiento antes de reintentar.')
-    }
+    alertas.error(mensajeError(e, 'No se pudo cargar la lista de personas dentro'))
   } finally {
-    procesando.value = false
+    cargandoDentro.value = false
   }
 }
-function nombreCategoria(categoria: CategoriaTicket) {
-  return categorias.find((c) => c.valor === categoria)?.nombre ?? categoria
+
+function nombreCategoria(categoria: string): string {
+  return { ESTUDIANTE: 'Estudiante', ADMINISTRATIVO: 'Administrativo', DOCENTE: 'Docente', EXTERNO: 'Particular' }[categoria] ?? categoria
 }
 function hora(valor?: string) {
   return valor ? new Date(valor).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'
 }
-function visibilidad() {
-  paginaVisible.value = !document.hidden
-}
-onMounted(() => document.addEventListener('visibilitychange', visibilidad))
-onUnmounted(() => document.removeEventListener('visibilitychange', visibilidad))
+
+onMounted(() => {
+  void cargarDentro()
+})
+
+const columnas = [
+  { clave: 'nombreCompleto', titulo: 'Nombre' },
+  { clave: 'ci', titulo: 'CI' },
+  { clave: 'categoria', titulo: 'Categoria' },
+  { clave: 'codigoIdentificacion', titulo: 'Codigo' },
+  { clave: 'entrada', titulo: 'Entrada' },
+]
 </script>
 
 <template>
   <div class="control">
-    <header class="encabezado">
-      <h2>Control de acceso</h2>
-      <p>Estudiantes: validación SIGSE. Administrativos, docentes y particulares: base local.</p>
-    </header>
-      <section class="card validar">
-        <div class="modos" aria-label="Movimiento a registrar">
-          <button :class="{ seleccionado: modo === 'ENTRADA' }" :aria-pressed="modo === 'ENTRADA'"
-            :disabled="procesando" @click="cambiarModo('ENTRADA')">↓ Entrada</button>
-          <button :class="{ seleccionado: modo === 'SALIDA' }" :aria-pressed="modo === 'SALIDA'"
-            :disabled="procesando" @click="cambiarModo('SALIDA')">↑ Salida</button>
-        </div>
-        <p class="instruccion">Escaneá para registrar una <b>{{ modo === 'ENTRADA' ? 'entrada' : 'salida' }}</b>.</p>
-        <EscannerQr :activo="paginaVisible && !procesando" @codigo="alCodigoLeido" />
-        <form class="manual" @submit.prevent="procesar(manual)">
-          <label for="codigo-control">Código del ticket o contenido del QR</label>
-          <div class="entrada-manual">
-            <input id="codigo-control" v-model="manual" placeholder="EST-000001, DOC-000001…"
-              autocomplete="off" :disabled="procesando" />
-            <button :disabled="procesando || !manual.trim()">Validar</button>
-          </div>
-        </form>
+    <div class="cabecera">
+      <div>
+        <h2>Control de acceso</h2>
+        <p class="subtitulo">
+          Pulse el boton de ENTRADA o de SALIDA para abrir ese escaner. Un estudiante se valida al entrar.
+        </p>
+      </div>
+      <button class="consultar-ru" @click="mostrarConsultaRu = true">Consultar RU</button>
+    </div>
 
-        <div class="ultima-validacion" role="status" aria-live="polite" aria-atomic="true">
-          <p v-if="procesando" class="esperando">Validando ticket… Estudiantes: consultando SIGSE.</p>
-          <p v-else-if="errorValidacion" class="resultado denegado">{{ errorValidacion }}</p>
-          <template v-else-if="resultado">
-            <div class="resultado" :class="resultado.bloqueado ? 'denegado' : !resultado.ultimoMovimiento ? 'sin-cambio' : resultado.dentro ? 'entrada' : 'salida'">
-              <strong>{{ resultado.bloqueado ? 'INGRESO DENEGADO' : !resultado.ultimoMovimiento ? 'SIN CAMBIO' : resultado.dentro ? 'ENTRADA REGISTRADA' : 'SALIDA REGISTRADA' }}</strong>
-              <span>{{ resultado.nombreCompleto }}</span>
-              <span>{{ resultado.codigoIdentificacion }} · {{ nombreCategoria(resultado.categoria) }}</span>
-            </div>
-            <p v-if="resultado.mensaje" class="aviso">{{ resultado.mensaje }}</p>
-            <p class="detalle">CI {{ resultado.ci }} <span v-if="resultado.ultimoMovimiento">· {{ hora(resultado.ultimoMovimiento.fechaHora) }}</span></p>
-            <p v-if="resultado.categoria === 'ESTUDIANTE'" class="detalle">
-              SIGSE: {{ resultado.matriculado === true ? 'Matriculado' : resultado.matriculado === false ? 'No matriculado' : 'Sin confirmación' }}
-            </p>
-            <details>
-              <summary>Ver datos del ticket</summary>
-              <p v-if="resultado.ru">RU: {{ resultado.ru }}</p>
-              <p v-if="resultado.carrera">Carrera: {{ resultado.carrera }}</p>
-              <p v-if="resultado.codigoAdministrativo">Código administrativo: {{ resultado.codigoAdministrativo }}</p>
-              <p v-if="resultado.codigoDocente">Código docente: {{ resultado.codigoDocente }}</p>
-              <p v-if="resultado.sigse?.data">Gestión SIGSE: {{ resultado.sigse.data.gestion }}</p>
-              <img v-if="resultado.sigse?.data?.url_imagen" :src="resultado.sigse.data.url_imagen" alt="Foto del estudiante" width="70" />
-            </details>
-          </template>
-          <p v-else class="detalle">Listo para escanear cualquier tipo de ticket.</p>
-        </div>
-      </section>
+    <div class="columnas">
+      <PanelEscaneo
+        ref="refEntrada"
+        tipo="ENTRADA"
+        titulo="Escaner de ENTRADA"
+        :activo="activo === 'ENTRADA'"
+        @abrir="abrir('ENTRADA')"
+        @cerrar="activo = null"
+        @validado="cargarDentro()"
+      />
+      <PanelEscaneo
+        ref="refSalida"
+        tipo="SALIDA"
+        titulo="Escaner de SALIDA"
+        :activo="activo === 'SALIDA'"
+        @abrir="abrir('SALIDA')"
+        @cerrar="activo = null"
+        @validado="cargarDentro()"
+      />
+    </div>
 
+    <div class="card">
+      <h3>Personas dentro del recinto ({{ dentro.length }})</h3>
+      <TablaDatos
+        :columnas="columnas"
+        :filas="dentro"
+        clave="idTicket"
+        :con-acciones="false"
+        :cargando="cargandoDentro"
+        texto-vacio="Nadie dentro del recinto."
+        placeholder-busqueda="Buscar persona o codigo..."
+      >
+        <template #col-categoria="{ valor }">{{ nombreCategoria(String(valor)) }}</template>
+        <template #col-entrada="{ valor }">{{ hora(valor ? String(valor) : undefined) }}</template>
+      </TablaDatos>
+    </div>
+
+    <ConsultaRu :abierto="mostrarConsultaRu" @cerrar="mostrarConsultaRu = false" />
   </div>
 </template>
 
 <style scoped>
-.control { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.encabezado h2 { margin: 0 0 6px; }
-.encabezado p, .detalle, .instruccion { color: var(--texto-suave); font-size: 13px; margin: 8px 0; }
-.modos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.modos button { min-height: 48px; background: #eef2f7; color: var(--texto); font-size: 17px; }
-.modos .seleccionado { background: var(--azul); color: white; }
-.entrada-manual { display: flex; gap: 8px; }
-.entrada-manual input { flex: 1; min-width: 0; }
-.entrada-manual button { min-height: 44px; }
-.ultima-validacion { margin-top: 14px; overflow-wrap: anywhere; }
-.resultado { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 10px; }
-.resultado strong { font-size: 18px; }
-.resultado.entrada { background: #dcfce7; color: #166534; }
-.resultado.salida { background: #ffedd5; color: #9a3412; }
-.resultado.denegado { background: #fee2e2; color: #991b1b; }
-.resultado.sin-cambio { background: #e0edf9; color: var(--azul); }
-.aviso { font-size: 13px; margin: 8px 0 0; }
-.esperando { font-weight: 600; color: var(--azul); }
-summary { cursor: pointer; padding: 10px 0; font-size: 13px; }
-.validar { width: 100%; max-width: 720px; min-width: 0; align-self: center; }
-@media (max-width: 768px) {
-  .validar :deep(.escanner) { min-height: 150px; max-height: 220px; aspect-ratio: 16 / 9; }
+.control { display: flex; flex-direction: column; gap: 16px; }
+
+.cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.subtitulo { color: var(--texto-suave); margin-top: -10px; font-size: 14px; }
+
+.consultar-ru { white-space: nowrap; }
+
+.columnas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .columnas { grid-template-columns: 1fr; }
 }
 </style>

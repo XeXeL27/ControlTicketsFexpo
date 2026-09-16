@@ -10,8 +10,6 @@ import java.util.List;
 
 /** Contrato de emisión y generación de tickets. */
 public interface TicketService {
-    TicketDetalleDto emitirDocente(Long idDocente);
-
     List<TicketDetalleDto> listar();
 
     TicketDetalleDto obtener(Long idTicket);
@@ -24,6 +22,9 @@ public interface TicketService {
 
     /** Emite el ticket de un administrativo (código ADM-… + qrToken). Idempotente. */
     TicketDetalleDto emitirAdministrativo(Long idAdministrativo);
+
+    /** Emite el ticket de un docente (código DOC-… + qrToken). Idempotente. */
+    TicketDetalleDto emitirDocente(Long idDocente);
 
     /**
      * Emite el ticket de varios estudiantes de una sola vez.
@@ -59,6 +60,9 @@ public interface TicketService {
 
     /** Marca o desmarca un ticket como impreso (por si hubo que reimprimir uno). */
     void marcarImpreso(Long idTicket, boolean impreso);
+
+    /** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+    TicketDetalleDto marcarEntrega(Long idTicket, boolean entregado);
 
     /** Vuelve a dejar como no impresos todos los tickets de una categoria (reinicia esa tanda). */
     int reiniciarImpresion(CategoriaTicket categoria);

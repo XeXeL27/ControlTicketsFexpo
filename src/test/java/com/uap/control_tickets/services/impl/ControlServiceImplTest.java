@@ -100,9 +100,30 @@ class ControlServiceImplTest {
         service.validar("qr", TipoAcceso.ENTRADA);
         var repetida = service.validar("qr", TipoAcceso.ENTRADA);
         assertTrue(repetida.isDentro());
+        assertTrue(repetida.isBloqueado());
+        assertEquals("YA_DENTRO", repetida.getMotivo());
         assertNull(repetida.getUltimoMovimiento());
         assertNotNull(repetida.getMensaje());
         verify(accesoDao, times(1)).save(any());
+    }
+
+    @Test
+    void salidaSinEntradaSeRechazaSinGuardarNiConsultarSigse() {
+        Ticket ticket = ticket(CategoriaTicket.ESTUDIANTE, false);
+        when(ticketDao.buscarParaControl("qr")).thenReturn(Optional.of(ticket));
+        var resultado = service.validar("qr", TipoAcceso.SALIDA);
+        assertTrue(resultado.isBloqueado());
+        assertEquals("YA_FUERA", resultado.getMotivo());
+        assertFalse(ticket.isDentro());
+        verify(ticketDao, never()).save(any());
+        verifyNoInteractions(accesoDao, api);
+    }
+
+    @Test
+    void movimientoEsObligatorio() {
+        assertThrows(com.uap.control_tickets.exception.NegocioException.class,
+                () -> service.validar("qr", null));
+        verifyNoInteractions(ticketDao, accesoDao, api);
     }
 
     @Test

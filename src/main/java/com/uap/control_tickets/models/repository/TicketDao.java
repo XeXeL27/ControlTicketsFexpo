@@ -18,7 +18,6 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
     @org.springframework.data.jpa.repository.Query("select t from Ticket t where t.qrToken = :codigo or t.codigoIdentificacion = :codigo")
     Optional<Ticket> buscarParaControl(@org.springframework.data.repository.query.Param("codigo") String codigo);
 
-    Optional<Ticket> findFirstByDocenteIdDocenteAndEstado(Long idDocente, EstadoRegistro estado);
 
     // --- Escaneo / validacion ---
     Optional<Ticket> findByQrToken(String qrToken);
@@ -34,6 +33,9 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
 
     // Ticket ya emitido para un administrativo.
     Optional<Ticket> findFirstByAdministrativoIdAdministrativoAndEstado(Long idAdministrativo, EstadoRegistro estado);
+
+    // Ticket ya emitido para un docente.
+    Optional<Ticket> findFirstByDocenteIdDocenteAndEstado(Long idDocente, EstadoRegistro estado);
 
     // --- Listados ---
     List<Ticket> findAllByEstado(EstadoRegistro estado);

@@ -9,6 +9,10 @@ export interface TicketDetalleDto {
   impreso: boolean
   /** Cuando se genero el pliego que lo incluyo (ISO-8601), null si nunca. */
   fechaImpresion?: string
+  /** true = el ticket físico ya se entregó a la persona. */
+  entregado: boolean
+  /** Cuando se marcó la entrega (ISO-8601), null si todavía no. */
+  fechaEntrega?: string
   idPersona: number
   nombreCompleto: string
   ci: string

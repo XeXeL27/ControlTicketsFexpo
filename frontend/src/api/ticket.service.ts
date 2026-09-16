@@ -19,14 +19,22 @@ export function emitirTicketEstudiante(idEstudiante: number) {
     .then((r) => r.data)
 }
 
-export function emitirTicketDocente(idDocente: number) {
-  return http.post<TicketDetalleDto>('/tickets/emitir-docente', null, { params: { idDocente } })
-    .then((r) => r.data)
-}
-
 export function emitirTicketAdministrativo(idAdministrativo: number) {
   return http
     .post<TicketDetalleDto>('/tickets/emitir-administrativo', null, { params: { idAdministrativo } })
+    .then((r) => r.data)
+}
+
+export function emitirTicketDocente(idDocente: number) {
+  return http
+    .post<TicketDetalleDto>('/tickets/emitir-docente', null, { params: { idDocente } })
+    .then((r) => r.data)
+}
+
+/** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+export function marcarEntrega(idTicket: number, entregado: boolean) {
+  return http
+    .patch<TicketDetalleDto>('/tickets/entrega', null, { params: { idTicket, entregado } })
     .then((r) => r.data)
 }
 

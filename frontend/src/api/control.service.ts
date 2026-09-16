@@ -4,15 +4,28 @@
 // responde 409 y el servicio lo convierte en la excepcion axios correspondiente;
 // la vista debe recoger el error.response.data como ValidacionTicketDto.
 import http from '@/api/http'
-import type { HistorialPersonaDto, ReportePersonaDto, PersonaDentroDto, ValidacionTicketDto } from '@/types/control.type'
+import type {
+  HistorialPersonaDto,
+  ReportePersonaDto,
+  PersonaDentroDto,
+  RespuestaSigseDto,
+  TipoMovimiento,
+  ValidacionTicketDto,
+} from '@/types/control.type'
 
 /**
- * Valida el codigo escaneado (qr_token) y registra la ENTRADA o SALIDA.
- * Devuelve el registro validado; lanza una excepcion axios si el ticket no
- * existe (404) o el ingreso fue bloqueado (409, cuerpo = ValidacionTicketDto).
+ * Valida el codigo escaneado (qr_token) con el escaner dedicado (tipoMovimiento).
+ * Devuelve el registro validado; lanza una excepcion axios si:
+ *  - el ticket no existe (404),
+ *  - el movimiento no coincide con el estado: ENTRADA estando dentro / SALIDA
+ *    estando fuera (409, cuerpo = ValidacionTicketDto),
+ *  - el ingreso fue bloqueado por la matricula (409, cuerpo = ValidacionTicketDto).
  */
-export async function validarTicket(codigo: string, tipo: 'ENTRADA' | 'SALIDA'): Promise<ValidacionTicketDto> {
-  const res = await http.post<ValidacionTicketDto>('/control/validar', { codigo, tipo }, { timeout: 15000 })
+export async function validarTicket(
+  codigo: string,
+  tipoMovimiento: TipoMovimiento,
+): Promise<ValidacionTicketDto> {
+  const res = await http.post<ValidacionTicketDto>('/control/validar', { codigo, tipoMovimiento }, { timeout: 15000 })
   return res.data
 }
 
@@ -31,5 +44,14 @@ export async function historialPersona(idPersona: number, pagina = 0, signal?: A
   const res = await http.get<HistorialPersonaDto>(`/control/reportes/personas/${idPersona}/historial`, {
     params: { pagina }, signal, timeout: 10000,
   })
+  return res.data
+}
+/**
+ * Consulta puntual de matricula por RU de un estudiante (sin tocar la BD).
+ * Devuelve SIEMPRE la respuesta completa de la consulta; el estado de la
+ * matricula viene en `data.estado_matriculacion` (true = matriculado).
+ */
+export async function consultarSigse(ru: number): Promise<RespuestaSigseDto> {
+  const res = await http.get<RespuestaSigseDto>(`/control/sigse/${ru}`)
   return res.data
 }
