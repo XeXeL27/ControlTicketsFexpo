@@ -24,7 +24,17 @@ import java.util.List;
 @Tag(name = "Docentes", description = "Gestión de docentes y carga masiva")
 public class DocenteController {
 
+    private final com.uap.control_tickets.services.impl.CambioTipoService cambioTipoService;
+
     private final DocenteService docenteService;
+
+    @PostMapping("/cambiar-a-administrativo")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<Void> cambiarTipo(@RequestParam Long idDocente,
+            @Valid @RequestBody com.uap.control_tickets.dto.persona.CambioTipoDto dto) {
+        cambioTipoService.aAdministrativo(idDocente);
+        return ResponseEntity.noContent().build();
+    }
 
     @GetMapping("/listar")
     @Operation(summary = "Listar docentes activos")

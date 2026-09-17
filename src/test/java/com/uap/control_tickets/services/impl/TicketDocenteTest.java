@@ -38,7 +38,7 @@ class TicketDocenteTest {
         docente.setPersona(persona);
         docente.setCodigoDocente("42");
         docente.setCarrera("Medicina");
-        when(docenteDao.findById(1L)).thenReturn(Optional.of(docente));
+        when(docenteDao.buscarParaCambio(1L)).thenReturn(Optional.of(docente));
         when(ticketDao.save(any())).thenAnswer(inv -> {
             Ticket ticket = inv.getArgument(0);
             ticket.setIdTicket(10L);

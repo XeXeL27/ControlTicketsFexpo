@@ -10,6 +10,10 @@ import java.util.Optional;
 
 @Repository
 public interface DocenteDao extends JpaRepository<Docente, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select e from Docente e where e.idDocente = :id")
+    Optional<Docente> buscarParaCambio(@org.springframework.data.repository.query.Param("id") Long id);
+
 
     List<Docente> findAllByEstado(EstadoRegistro estado);
 

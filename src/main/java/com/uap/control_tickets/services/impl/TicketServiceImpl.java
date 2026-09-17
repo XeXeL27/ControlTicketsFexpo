@@ -322,7 +322,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public TicketDetalleDto emitirAdministrativo(Long idAdministrativo) {
-        Administrativo admin = administrativoDao.findById(idAdministrativo)
+        Administrativo admin = administrativoDao.buscarParaCambio(idAdministrativo)
                 .filter(a -> a.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Administrativo no encontrado"));
 
@@ -346,7 +346,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public TicketDetalleDto emitirDocente(Long idDocente) {
-        Docente doc = docenteDao.findById(idDocente)
+        Docente doc = docenteDao.buscarParaCambio(idDocente)
                 .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Docente no encontrado"));
 

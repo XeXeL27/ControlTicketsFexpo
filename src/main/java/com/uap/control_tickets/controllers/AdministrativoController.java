@@ -24,7 +24,17 @@ import java.util.List;
 @Tag(name = "Administrativos", description = "Gestión de administrativos y carga masiva")
 public class AdministrativoController {
 
+    private final com.uap.control_tickets.services.impl.CambioTipoService cambioTipoService;
+
     private final AdministrativoService administrativoService;
+
+    @PostMapping("/cambiar-a-docente")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<Void> cambiarTipo(@RequestParam Long idAdministrativo,
+            @Valid @RequestBody com.uap.control_tickets.dto.persona.CambioTipoDto dto) {
+        cambioTipoService.aDocente(idAdministrativo, dto.getCarrera());
+        return ResponseEntity.noContent().build();
+    }
 
     @GetMapping("/listar")
     @Operation(summary = "Listar administrativos activos")

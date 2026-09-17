@@ -10,6 +10,7 @@ const { estado, responder } = useConfirmacion()
 <template>
   <ModalBase
     v-if="estado.visible"
+    style="z-index: 60"
     :titulo="estado.titulo"
     ancho="400px"
     @cerrar="responder(false)"

@@ -33,3 +33,8 @@ export function previsualizarDocentesCsv(archivo: File) {
     .post<PrevisualizacionDocCsvDto>('/docentes/previsualizar', fd)
     .then((r) => r.data)
 }
+
+export function cambiarDocenteAAdministrativo(idDocente: number) {
+  return http.post('/docentes/cambiar-a-administrativo',
+    { confirmado: true }, { params: { idDocente } })
+}

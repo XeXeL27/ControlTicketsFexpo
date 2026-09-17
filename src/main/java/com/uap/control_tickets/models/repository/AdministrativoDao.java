@@ -10,6 +10,10 @@ import java.util.Optional;
 
 @Repository
 public interface AdministrativoDao extends JpaRepository<Administrativo, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select e from Administrativo e where e.idAdministrativo = :id")
+    Optional<Administrativo> buscarParaCambio(@org.springframework.data.repository.query.Param("id") Long id);
+
 
     List<Administrativo> findAllByEstado(EstadoRegistro estado);
 

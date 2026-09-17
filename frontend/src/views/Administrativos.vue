@@ -12,6 +12,7 @@ import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
 import {
+  cambiarAdministrativoADocente,
   crearAdministrativo,
   eliminarAdministrativo,
   importarAdministrativosCsv,
@@ -156,6 +157,41 @@ async function guardar() {
     await cargar()
   } catch (e) {
     errorForm.value = mensajeError(e, 'Error al guardar')
+  }
+}
+
+const cambiandoTipo = ref(false)
+const seleccionadoCambio = ref<AdministrativoDetalleDto | null>(null)
+const carreraCambio = ref('')
+const errorCambio = ref('')
+
+function abrirCambio(a: AdministrativoDetalleDto) {
+  seleccionadoCambio.value = a
+  carreraCambio.value = ''
+  errorCambio.value = ''
+}
+
+async function cambiarTipo() {
+  const a = seleccionadoCambio.value
+  if (!a || cambiandoTipo.value) return
+  cambiandoTipo.value = true
+  errorCambio.value = ''
+  try {
+    const ok = await confirmar({
+      titulo: 'Confirmar cambio a docente',
+      mensaje: '¿Estás seguro de cambiar a ' + a.nombreCompleto + ' (CI ' + a.ci + ') de administrativo a docente? Se conservarán sus datos, código y QR del ticket, impresión, entrega e historial. Los pliegos ya impresos seguirán siendo válidos y conservarán su texto original.',
+      textoConfirmar: 'Sí, cambiar a docente',
+      textoCancelar: 'Cancelar',
+    })
+    if (!ok) return
+    await cambiarAdministrativoADocente(a.idAdministrativo, carreraCambio.value.trim())
+    seleccionadoCambio.value = null
+    alertas.exito('Cambio a docente realizado. Se conservaron los datos y tickets.')
+    await cargar()
+  } catch (e) {
+    errorCambio.value = mensajeError(e, 'No se pudo cambiar el tipo')
+  } finally {
+    cambiandoTipo.value = false
   }
 }
 
@@ -413,6 +449,7 @@ onMounted(cargar)
       <template #acciones="{ fila }">
         <button v-if="!fila.idTicket" @click="emitir(fila)">Emitir ticket</button>
         <button v-else class="secundario" @click="verQr(fila)">Ver QR</button>
+        <button class="secundario" :disabled="cambiandoTipo || emitiendo" @click="abrirCambio(fila)">Cambiar a docente</button>
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>
       </template>
     </TablaDatos>
@@ -425,6 +462,24 @@ onMounted(cargar)
       :total="progreso.total"
       :subtitulo="progreso.subtitulo"
     />
+
+    <ModalBase v-if="seleccionadoCambio" titulo="Cambiar a docente"
+      @cerrar="!cambiandoTipo && (seleccionadoCambio = null)">
+      <form id="form-cambio-tipo" @submit.prevent="cambiarTipo">
+        <p>{{ seleccionadoCambio.nombreCompleto }} · CI {{ seleccionadoCambio.ci }}</p>
+        <p>Se conservarán los datos y los tickets existentes, incluso si ya están impresos.</p>
+        <label>Carrera del docente</label>
+        <input v-model="carreraCambio" maxlength="255" :disabled="cambiandoTipo" />
+        <p class="ayuda">Si antes era docente, dejá el campo vacío para conservar su carrera. Para un docente nuevo, indicá la carrera.</p>
+        <Alerta v-if="errorCambio" tipo="error">{{ errorCambio }}</Alerta>
+      </form>
+      <template #pie>
+        <button class="secundario" :disabled="cambiandoTipo" @click="seleccionadoCambio = null">Cancelar</button>
+        <button type="submit" form="form-cambio-tipo" :disabled="cambiandoTipo">
+          {{ cambiandoTipo ? 'Procesando...' : 'Continuar' }}
+        </button>
+      </template>
+    </ModalBase>
 
     <!-- Modal alta individual -->
     <ModalBase v-if="mostrarModal" titulo="Nuevo administrativo" @cerrar="mostrarModal = false">

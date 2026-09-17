@@ -11,6 +11,12 @@ import java.util.Optional;
 
 @Repository
 public interface TicketDao extends JpaRepository<Ticket, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    List<Ticket> findAllByAdministrativoIdAdministrativo(Long idAdministrativo);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    List<Ticket> findAllByDocenteIdDocente(Long idDocente);
+
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")
     @org.springframework.data.jpa.repository.Query("select t from Ticket t order by t.idTicket")
     List<Ticket> ticketsParaReporte();
