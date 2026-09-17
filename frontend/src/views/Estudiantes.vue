@@ -23,6 +23,7 @@ import {
   obtenerTicketPdf,
   obtenerTicketPng,
 } from '@/api/ticket.service'
+import { huellasDeEstudiante } from '@/api/huella.service'
 import type {
   EstudianteDetalleDto,
   EstudianteDto,
@@ -30,6 +31,7 @@ import type {
   PrevisualizacionCsvDto,
 } from '@/types/estudiante.type'
 import type { EmisionMasivaDto } from '@/types/ticket.type'
+import type { HuellaDigitalDto } from '@/types/huella.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
 const alertas = useAlertas()
@@ -59,6 +61,8 @@ const LOTE_EMISION = 25
 
 // --- Filtro por carrera ---
 const carreraSel = ref('')
+// --- Filtro por huella (sincronizada del biométrico): '' = todos, 'con', 'sin' ---
+const filtroHuella = ref('')
 
 // --- Modal alta individual ---
 const mostrarModal = ref(false)
@@ -70,12 +74,34 @@ const mostrarTicket = ref(false)
 const ticketUrl = ref('')          // object URL del PNG
 const ticketIdActual = ref<number | null>(null)
 
+// --- Modal ver huellas (las N guardadas: qué dedo, de qué equipo, cuándo) ---
+const mostrarHuellas = ref(false)
+const huellasDe = ref<EstudianteDetalleDto | null>(null)
+const huellas = ref<HuellaDigitalDto[]>([])
+const cargandoHuellas = ref(false)
+
+async function verHuellas(fila: EstudianteDetalleDto) {
+  huellasDe.value = fila
+  huellas.value = []
+  mostrarHuellas.value = true
+  cargandoHuellas.value = true
+  try {
+    huellas.value = await huellasDeEstudiante(fila.idEstudiante)
+  } catch (e) {
+    alertas.error(mensajeError(e, 'No se pudieron traer las huellas'))
+    mostrarHuellas.value = false
+  } finally {
+    cargandoHuellas.value = false
+  }
+}
+
 const columnas: ColumnaTabla[] = [
   { clave: 'ru', titulo: 'R.U.', ancho: '100px' },
   { clave: 'nombreCompleto', titulo: 'Nombre completo' },
   { clave: 'ci', titulo: 'CI', ancho: '110px' },
   { clave: 'carrera', titulo: 'Carrera' },
   { clave: 'codigoTicket', titulo: 'Ticket', ancho: '140px' },
+  { clave: 'tieneHuella', titulo: 'Huella', ancho: '90px' },
 ]
 
 /** Carreras presentes en los datos, para el desplegable del filtro. */
@@ -87,10 +113,13 @@ const carreras = computed(() => {
   return [...set].sort((a, b) => a.localeCompare(b, 'es'))
 })
 
-/** Lo que ve la tabla: ya filtrado por carrera (el buscador lo aplica TablaDatos). */
+/** Lo que ve la tabla: filtrado por carrera y por huella (el buscador lo aplica TablaDatos). */
 const estudiantesFiltrados = computed(() => {
-  if (!carreraSel.value) return estudiantes.value
-  return estudiantes.value.filter((e) => e.carrera === carreraSel.value)
+  let lista = estudiantes.value
+  if (carreraSel.value) lista = lista.filter((e) => e.carrera === carreraSel.value)
+  if (filtroHuella.value === 'con') lista = lista.filter((e) => e.tieneHuella)
+  else if (filtroHuella.value === 'sin') lista = lista.filter((e) => !e.tieneHuella)
+  return lista
 })
 
 /** Cuantos de los que se ven todavia no tienen ticket. */
@@ -467,11 +496,16 @@ onMounted(cargar)
       placeholder-busqueda="Buscar..."
       texto-vacio="Sin estudiantes registrados."
     >
-      <!-- Filtro por carrera, al lado del buscador -->
+      <!-- Filtros por carrera y huella, al lado del buscador -->
       <template #herramientas>
         <select v-model="carreraSel" style="max-width:260px">
           <option value="">Todas las carreras ({{ estudiantes.length }})</option>
           <option v-for="c in carreras" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="filtroHuella" style="max-width:170px" title="Filtrar por huella del biométrico">
+          <option value="">Huella: todos</option>
+          <option value="con">Con huella</option>
+          <option value="sin">Sin huella</option>
         </select>
       </template>
 
@@ -484,9 +518,15 @@ onMounted(cargar)
         <span v-else style="color:var(--texto-suave)">—</span>
       </template>
 
+      <template #col-tieneHuella="{ valor }">
+        <span v-if="valor" class="chip" title="Huella descargada del biométrico">✓</span>
+        <span v-else style="color:var(--texto-suave)" title="Sin huella">—</span>
+      </template>
+
       <template #acciones="{ fila }">
         <button v-if="!fila.idTicket" @click="emitir(fila)">Emitir ticket</button>
         <button v-else class="secundario" @click="verTicket(fila)">Ver ticket</button>
+        <button v-if="fila.tieneHuella" class="secundario" @click="verHuellas(fila)">Huellas</button>
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>
       </template>
     </TablaDatos>
@@ -526,6 +566,26 @@ onMounted(cargar)
         <button @click="descargarPdf">Descargar PDF</button>
       </template>
     </ModalBase>
+
+    <!-- Modal ver huellas: las N guardadas con su dedo y equipo de origen -->
+    <ModalBase v-if="mostrarHuellas" :titulo="`Huellas de ${huellasDe?.nombreCompleto ?? ''}`" @cerrar="mostrarHuellas = false">
+      <p v-if="cargandoHuellas" class="ayuda">Cargando…</p>
+      <table v-else class="hist">
+        <thead><tr><th>Dedo</th><th>Equipo</th><th>Versión</th><th>Descargada</th></tr></thead>
+        <tbody>
+          <tr v-for="h in huellas" :key="h.idHuella">
+            <td><strong>{{ h.nombreDedo }}</strong></td>
+            <td>{{ h.equipoOrigen || '—' }}</td>
+            <td>{{ h.versionBiometrica || '—' }}</td>
+            <td>{{ h.fechaCaptura ? new Date(h.fechaCaptura).toLocaleString('es-BO') : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="ayuda">El nº de dedo es el slot que informó el biométrico (0-9); el equipo no dice qué dedo anatómico es.</p>
+      <template #pie>
+        <button class="secundario" @click="mostrarHuellas = false">Cerrar</button>
+      </template>
+    </ModalBase>
   </div>
 </template>
 
@@ -541,4 +601,6 @@ onMounted(cargar)
 }
 .numero { font-size: 22px; font-weight: 700; line-height: 1.1; }
 .etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 2px; }
+.hist { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.hist th, .hist td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
 </style>

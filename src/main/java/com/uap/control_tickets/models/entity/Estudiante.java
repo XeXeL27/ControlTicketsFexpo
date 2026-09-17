@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.Instant;
+
 /**
  * Estudiante: una Persona con datos academicos.
  *
@@ -36,4 +38,14 @@ public class Estudiante extends AuditoriaConfig {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_persona", nullable = false)
     private Persona persona;
+
+    /**
+     * Flag rápido de "con huella": se prende al guardar el primer template en
+     * huella_digital. Evita un join/EXISTS para filtrar en las pantallas.
+     */
+    @Column(name = "tiene_huella", nullable = false)
+    private Boolean tieneHuella = false;
+
+    @Column(name = "fecha_huella")
+    private Instant fechaHuella;
 }

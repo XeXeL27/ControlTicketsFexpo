@@ -123,6 +123,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/docentes">Docentes</router-link>
             <router-link to="/impresion">Impresión</router-link>
             <router-link to="/entrega">Entrega</router-link>
+            <router-link to="/huellas">Huellas</router-link>
           </div>
 
           <div class="menu-seccion">

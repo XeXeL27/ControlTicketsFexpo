@@ -201,6 +201,43 @@ Hecho:
     `ApiService` hace POST con header `x-api-key` a `sigse.url`/`sigse.api-key`
     (`SigseProperties`, `RestTemplate`).
 
+- **Módulo HUELLAS (biométricos ZKTeco) listo**: traer los templates de huella
+  de uno o varios equipos y marcar al estudiante como "con huella".
+  - El **PIN del equipo es el RU**: se cruza con `EstudianteDao.findByRu`.
+  - **Driver Java puro por TCP 4370** (`services/biometrico/ZktecoTcpDriver`:
+    cabecera 8 bytes LE + checksum, CONNECT → DISABLE → tabla de usuarios →
+    template por dedo → ENABLE → EXIT), sin DLL (el servidor es Linux).
+    Los códigos de comando están como constantes arriba del driver; la lectura
+    de template prueba SSR (`CMD_DB_RRQ`) y después clásico
+    (`CMD_USERTEMP_RRQ`). El PIN se extrae como "el string de dígitos" del
+    registro (el RU siempre es numérico), así no depende del offset del firmware.
+  - **Modo simulación** (`app.biometria.simulacion`, default `false` en el
+    properties base): `SimulacionBiometricoDriver` devuelve 4 usuarios
+    inventados (RU 1001 con huella, 1002 sin huella, 9999 inexistente, 1001
+    repetido) para probar barra + reporte sin equipo. Con `true` se prueba el
+    flujo entero en local.
+  - Tablas: `dispositivo_biometrico` (nombre/IP/puerto/timeout/activo),
+    `huella_digital` (estudiante + dedo 0-9 + template Base64 TEXT + equipo
+    origen; UNIQUE por estudiante+dedo), `sincronizacion_huella` (job con
+    contadores) + `sincronizacion_huella_detalle` (una fila por RU con
+    `resultado` = CORRECTO/DUPLICADO/NO_ENCONTRADO/SIN_HUELLA/ERROR).
+    `Estudiante` sumó `tieneHuella` + `fechaHuella` (flag rápido para filtros).
+  - El job corre en **2º plano** (`@Async` pool `huellas`, `AsyncConfig`, un job
+    por vez): publica el avance en **WS `/topic/huellas/{jobId}`** (+ polling a
+    `/huellas/progreso` de respaldo) y guarda **una transacción chica por RU**
+    (`HuellaUsuarioProcesador`, mismo patrón que la emisión masiva: un RU que
+    falla no tumba el lote). Un equipo caído no frena a los demás (queda en
+    `mensajeError`). Se puede **cancelar** desde la pantalla.
+  - Frontend: `views/Huellas.vue` (`/huellas`, en el menú Tickets QR): ABM de
+    equipos + probar conexión (diagnóstico) + sincronizar con checkboxes +
+    `ProgresoModal` en vivo + reporte con 5 contadores y filtro por resultado +
+    historial. `Estudiantes.vue` sumó columna ✓ y filtro Con/Sin huella.
+  - ⚠️ **A calibrar contra el equipo real**: el protocolo pull no está
+    documentado por ZKTeco y varía por firmware. `POST
+    /api/biometricos/probar-conexion` dice en qué paso falla; ajustar
+    `pedirTemplateSsr`/`pedirTemplateClasico`/`parsearUsuarios` según lo que
+    responda el equipo (ver comentario arriba del driver).
+
 Pendiente:
 - **Arte (plantillas PNG) de administrativo y particular** + generalizar
   `TicketRenderer` (hoy `pdfPliegoEstudiantes`/`DatosTicketEstudiante` tienen
@@ -467,6 +504,8 @@ Claves importantes del perfil `jarv`:
   entrar a ningún estudiante. ⚠️ Hoy están escritas en el `application.properties`
   **base, que sí está en git** (desde el commit `cfc8aa2`), a diferencia del resto de
   secretos; lo correcto sería moverlas al properties local o a variables de entorno.
+- `app.biometria.simulacion` (base, default `false`): en `true` el módulo de huellas
+  usa datos inventados en vez de la red, para probar barra + reporte sin equipo.
 
 ---
 
@@ -545,6 +584,27 @@ Todos bajo el prefijo `/api` (lo agrega `WebConfig`).
 codificación detectada, el separador, si hubo encabezado, cuántas filas son altas y
 cuántas actualizaciones, más las primeras 15 filas ya parseadas. Alimenta la vista
 previa de las pantallas de estudiantes y administrativos.
+
+**Biométricos** (ADMINISTRADOR) — `/api/biometricos`
+- `GET /listar` · `GET /obtener?idDispositivo=` · `POST /crear` · `PUT /actualizar?idDispositivo=` · `DELETE /eliminar?idDispositivo=`
+- `POST /probar-conexion?idDispositivo=` — conecta al equipo y devuelve
+  plataforma/serie/usuarios/huellas (o 400 con el paso donde falló).
+
+**Huellas / sincronización** (ADMINISTRADOR) — `/api/huellas`
+- `POST /sincronizar` — body opcional: lista de ids de equipos (vacío = todos los
+  activos). Crea el job y lo lanza en 2º plano; devuelve `{jobId}` enseguida.
+- `GET /progreso?jobId=` — `{estado, total, procesados, porcentaje, correctos,
+  duplicados, noEncontrados, sinHuella, errores, ruActual, equipoActual}` (polling).
+- WS **`/topic/huellas/{jobId}`** — mismo progreso en vivo por STOMP (igual patrón
+  que `/topic/boletos`; ver `frontend/src/api/ws-huellas.ts`).
+- `GET /resultado?jobId=&filtroEstado=` — reporte final (filtro: TODOS/CORRECTO/
+  DUPLICADO/NO_ENCONTRADO/SIN_HUELLA/ERROR).
+- `GET /historial` · `POST /cancelar?jobId=`
+- `GET /estudiante?idEstudiante=` — las N huellas guardadas (dedo, equipo,
+  versión, fecha; sin los bytes). La usa el modal "Huellas" de Estudiantes.
+  > El **dedo es el slot 0-9 que informa el equipo** (no dice qué dedo
+  > anatómico es): `DedoBiometrico.etiqueta()` lo muestra como "Dedo N". El
+  > reporte dice qué dedos se guardaron por RU (ej. "Dedos guardados: 0, 1").
 
 **Control / escáner** (ADMINISTRADOR + CONTROL) — `/api/control`
 - `POST /validar` — body `{ codigo (qrToken), tipoMovimiento: ENTRADA|SALIDA }`.
@@ -661,6 +721,27 @@ Acceso  (validación / log de escaneos)
   tipo      ENTRADA | SALIDA
   fechaHora
   + auditoría / estado (el usuario CONTROL que escanea queda en _registro_id_usuario)
+
+DispositivoBiometrico (equipos ZKTeco)
+  idDispositivo (PK) · nombre · ip · puerto (4370) · timeoutMs · activo
+  + auditoría / estado
+
+HuellaDigital (templates descargados del equipo)
+  idHuella (PK) · estudiante (FK) · dedo (0-9) · template (TEXT Base64)
+  · versionBiometrica · equipoOrigen · fechaCaptura
+  + auditoría / estado; UNIQUE (estudiante, dedo)
+  (Estudiante.tieneHuella/fechaHuella = flag rápido para filtros)
+
+SincronizacionHuella (job de sincronización)
+  idSincronizacion (PK) · estadoJob (EN_CURSO/FINALIZADO/ERROR/CANCELADO)
+  · totalUsuarios · procesados · correctos/duplicados/noEncontrados/sinHuella/errores
+  · equipos · mensajeError · fechaFin
+  + auditoría / estado
+
+SincronizacionHuellaDetalle (una fila por RU del reporte final)
+  idDetalle (PK) · sincronizacion (FK) · ru · equipo
+  · resultado (CORRECTO/DUPLICADO/NO_ENCONTRADO/SIN_HUELLA/ERROR) · mensaje
+  + auditoría / estado (nunca se borra: es el historial)
 ```
 El campo `dentro` en Ticket permite responder rápido "¿quién está adentro?"; el
 histórico completo queda en `Acceso`.

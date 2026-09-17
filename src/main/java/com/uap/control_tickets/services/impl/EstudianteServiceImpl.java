@@ -343,6 +343,8 @@ public class EstudianteServiceImpl implements EstudianteService {
         dto.setFacultad(e.getFacultad());
         dto.setCarrera(e.getCarrera());
         dto.setEstado(e.getEstado().name());
+        dto.setTieneHuella(Boolean.TRUE.equals(e.getTieneHuella()));
+        dto.setFechaHuella(e.getFechaHuella() == null ? null : e.getFechaHuella().toString());
 
         Persona p = e.getPersona();
         dto.setIdPersona(p.getIdPersona());

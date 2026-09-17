@@ -21,6 +21,9 @@ export interface EstudianteDetalleDto {
   estado: string
   idTicket?: number | null
   codigoTicket?: string | null
+  /** true si ya se descargó su huella del biométrico. */
+  tieneHuella?: boolean | null
+  fechaHuella?: string | null
 }
 
 export interface ImportacionResultadoDto {

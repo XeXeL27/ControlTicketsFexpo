@@ -19,4 +19,8 @@ public class EstudianteDetalleDto {
     // Si ya tiene ticket emitido, se informa su id y código (si no, null).
     private Long idTicket;
     private String codigoTicket;
+
+    // Huella descargada del biométrico (flag rápido de Estudiante).
+    private Boolean tieneHuella;
+    private String fechaHuella;
 }

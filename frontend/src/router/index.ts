@@ -21,6 +21,8 @@ import Docentes from '@/views/Docentes.vue'
 // Pantallas de impresión y entrega de tickets
 import Impresion from '@/views/Impresion.vue'
 import Entrega from '@/views/Entrega.vue'
+// Huellas con biométricos ZKTeco (sincronización por RU)
+import Huellas from '@/views/Huellas.vue'
 
 // --- FASE 2 - Control y Monitoreo del ticket QR (Validador, reportes) ---
 import ControlValidador from '@/views/control/ControlValidador.vue'
@@ -51,6 +53,7 @@ const routes: RouteRecordRaw[] = [
   // FASE 2 - Impresión y entrega de tickets
   { path: '/impresion', component: Impresion },
   { path: '/entrega', component: Entrega },
+  { path: '/huellas', component: Huellas },
 
   // FASE 2 - Control y monitoreo del ticket QR
   { path: '/control', component: ControlValidador },
