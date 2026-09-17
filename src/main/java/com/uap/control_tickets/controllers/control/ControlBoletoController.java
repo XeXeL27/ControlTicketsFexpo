@@ -40,7 +40,7 @@ public class ControlBoletoController {
             description = "Busca el boleto por codigo y registra la ENTRADA o SALIDA segun el "
                     + "escaner dedicado (tipoMovimiento). Intento duplicado (entrar estando dentro / "
                     + "salir estando fuera): 409 con motivo (YA_DENTRO/YA_FUERA). Codigo inexistente: 404.")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<ValidacionBoletoDto> validar(@Valid @RequestBody ValidacionBoletoRequestDto request) {
         ValidacionBoletoDto dto = controlBoletoService.validar(request.getCodigo(), request.getTipoMovimiento());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
@@ -49,14 +49,14 @@ public class ControlBoletoController {
 
     @GetMapping("/dentro")
     @Operation(summary = "Boletos que estan actualmente dentro del recinto")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<List<BoletoDentroDto>> boletosDentro() {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(controlBoletoService.boletosDentro());
     }
 
     @GetMapping("/resumen")
     @Operation(summary = "Foto del estado actual (dentro, total, ingresos y salidas)")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<ResumenBoletosDto> resumen() {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(controlBoletoService.resumen());
     }

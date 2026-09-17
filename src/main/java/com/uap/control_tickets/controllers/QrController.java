@@ -28,7 +28,7 @@ public class QrController {
 
     @GetMapping(value = "/generar", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Generar un QR", description = "Devuelve un PNG con el QR del contenido dado")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> generar(
             @RequestParam String contenido,
             @RequestParam(defaultValue = "300") int tamano) {

@@ -44,7 +44,7 @@ public class ControlController {
                     + "SALIDA segun el escaner dedicado (tipoMovimiento). Intento duplicado "
                     + "(entrar estando dentro / salir estando fuera) o estudiante no matriculado "
                     + "al entrar: 409 con motivo (YA_DENTRO/YA_FUERA/NO_MATRICULADO).")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_CONCIERTO')")
     public ResponseEntity<ValidacionTicketDto> validar(@Valid @RequestBody ValidacionRequestDto request) {
         ValidacionTicketDto dto = controlService.validar(request.getCodigo(), request.getTipoMovimiento());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
@@ -53,7 +53,7 @@ public class ControlController {
 
     @GetMapping("/dentro")
     @Operation(summary = "Personas que estan actualmente dentro del recinto")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_CONCIERTO')")
     public ResponseEntity<List<PersonaDentroDto>> personasDentro() {
         return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(controlService.personasDentro());
@@ -64,7 +64,7 @@ public class ControlController {
             description = "Consulta puntual sin tocar la BD. Devuelve SIEMPRE los datos "
                     + "completos del estudiante (con o sin matricula vigente) para que el front los "
                     + "pinte de verde/rojo.")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_CONCIERTO')")
     public ResponseEntity<ApiResponseDto> consultarSigse(@PathVariable Integer ru) {
         return ResponseEntity.ok(controlService.consultarSigse(ru));
     }

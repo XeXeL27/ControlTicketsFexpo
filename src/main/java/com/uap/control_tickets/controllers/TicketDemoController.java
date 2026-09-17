@@ -32,7 +32,7 @@ public class TicketDemoController {
 
     @GetMapping(value = "/estudiante.png", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Ticket de estudiante (PNG) con datos de prueba")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> estudiantePng(
             @RequestParam(defaultValue = "Juan Carlos Perez Lopez") String nombreCompleto,
             @RequestParam(defaultValue = "32963") String ru,
@@ -51,7 +51,7 @@ public class TicketDemoController {
 
     @GetMapping(value = "/estudiante.pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     @Operation(summary = "Ticket de estudiante (PDF) con datos de prueba")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> estudiantePdf(
             @RequestParam(defaultValue = "Juan Carlos Perez Lopez") String nombreCompleto,
             @RequestParam(defaultValue = "32963") String ru,

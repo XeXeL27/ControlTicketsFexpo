@@ -4,7 +4,7 @@
 // Si hay sesion, muestra la barra superior + menu lateral + la vista actual.
 // El menu esta agrupado por secciones (fases del proyecto). En movil el menu
 // es un cajon desplegable (hamburguesa) con foco atrapado y cierre por ESC.
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { auth } from '@/store/auth'
 import AlertasHost from '@/components/AlertasHost.vue'
@@ -12,6 +12,13 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
+
+// Qué secciones del menú ve cada rol (debe coincidir con las guardas del router).
+// - CONTROL_FERIA  → sección "Boletos de la feria" (control + estado + monitoreo).
+// - CONTROL_CONCIERTO → sección "Control de acceso" QR (validador + personas dentro).
+const esAdmin = computed(() => auth.tieneRol('ADMINISTRADOR'))
+const verConcierto = computed(() => esAdmin.value || auth.tieneRol('CONTROL_CONCIERTO'))
+const verFeria = computed(() => esAdmin.value || auth.tieneRol('CONTROL_FERIA'))
 const esMovil = ref(false)
 const menuAbierto = ref(false)
 const botonMenu = ref<HTMLButtonElement | null>(null)
@@ -108,7 +115,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
           <button type="button" class="secundario" aria-label="Cerrar menú" @click="cerrarMenu">✕</button>
         </div>
         <nav aria-label="Navegación principal" @click="esMovil && ($event.target as HTMLElement).closest('a') && cerrarMenu()">
-          <div class="menu-seccion">
+          <div v-if="esAdmin" class="menu-seccion">
             <span class="menu-seccion-titulo">Administración</span>
             <router-link to="/">Inicio</router-link>
             <router-link to="/personas">Personas</router-link>
@@ -116,7 +123,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/roles">Roles</router-link>
           </div>
 
-          <div class="menu-seccion">
+          <div v-if="esAdmin" class="menu-seccion">
             <span class="menu-seccion-titulo">Tickets (QR)</span>
             <router-link to="/estudiantes">Estudiantes</router-link>
             <router-link to="/administrativos">Administrativos</router-link>
@@ -125,17 +132,18 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/entrega">Entrega</router-link>
           </div>
 
-          <div class="menu-seccion">
-            <span class="menu-seccion-titulo">Control y monitoreo</span>
+          <div v-if="verConcierto" class="menu-seccion">
+            <span class="menu-seccion-titulo">Control de acceso (concierto)</span>
             <router-link to="/control">Control de acceso</router-link>
             <router-link to="/personas-dentro">Personas dentro</router-link>
-            <router-link to="/reportes/personas">Reporte de accesos</router-link>
+            <router-link v-if="esAdmin" to="/reportes/personas">Reporte de accesos</router-link>
           </div>
 
-          <div class="menu-seccion">
+          <div v-if="verFeria" class="menu-seccion">
             <span class="menu-seccion-titulo">Boletos de la feria</span>
-            <router-link to="/boletos">Boletos</router-link>
+            <router-link v-if="esAdmin" to="/boletos">Boletos</router-link>
             <router-link to="/control-boletos">Control de boletos</router-link>
+            <router-link to="/estado-boletos">Estado de boletos</router-link>
             <router-link to="/pulso-fexpo">Monitoreo FEXPO</router-link>
           </div>
         </nav>

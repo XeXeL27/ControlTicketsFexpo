@@ -52,9 +52,16 @@ public class AdminInitializer implements ApplicationRunner {
         inicializarAdmin();
     }
 
-    /** Roles base del sistema. ADMINISTRADOR gestiona; CONTROL escanea tickets. */
+    /**
+     * Roles base del sistema:
+     * - ADMINISTRADOR: gestiona todo.
+     * - CONTROL_CONCIERTO: valida boletos al ingreso del concierto + monitoreo.
+     * - CONTROL_FERIA: valida boletos de la feria.
+     * (El antiguo rol CONTROL quedó reemplazado por los dos de arriba; si existe
+     * en la BD de una instalación previa, se deja pero ya no se usa.)
+     */
     private void inicializarRoles() {
-        List<String> rolesPorDefecto = List.of("ADMINISTRADOR", "CONTROL");
+        List<String> rolesPorDefecto = List.of("ADMINISTRADOR", "CONTROL_CONCIERTO", "CONTROL_FERIA");
         for (String nombreRol : rolesPorDefecto) {
             if (rolDao.findByNombre(nombreRol).isEmpty()) {
                 Rol rol = new Rol();

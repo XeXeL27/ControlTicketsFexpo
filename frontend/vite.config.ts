@@ -2,6 +2,11 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+// ¿Se está sirviendo el front por un túnel (ngrok, https en 443)? Poner
+// VITE_HMR_TUNEL=1 antes de `npm run dev` SOLO en ese caso. En local (lo normal)
+// se deja sin definir para que el HMR use el mismo puerto 5900.
+const usarTunel = process.env.VITE_HMR_TUNEL === '1'
+
 // Configuracion de Vite (el servidor de desarrollo del frontend).
 export default defineConfig({
   plugins: [vue()],
@@ -15,9 +20,11 @@ export default defineConfig({
     // Permite servir el front a traves de un tunel (ngrok) sin que Vite
     // rechace la peticion por el Host header del dominio publico.
     allowedHosts: true,
-    // El cliente de HMR (recarga en caliente) debe hablar por el 443 (https del tunel),
-    // no por el 5900 local, para no llenar la consola de errores de WebSocket.
-    hmr: { clientPort: 443 },
+    // HMR (recarga en caliente): en LOCAL habla por el mismo 5900 (default). Solo
+    // con el túnel se fuerza el 443 (https del túnel). Antes estaba fijo en 443, y
+    // en local el navegador intentaba ws://localhost:443 (nada escucha ahí) →
+    // "WebSocket failed" en la consola.
+    hmr: usarTunel ? { clientPort: 443 } : true,
     proxy: {
       // Todo lo que empiece con /api se reenvia al backend Spring Boot.
       // Asi en el codigo llamamos "/api/..." sin preocuparnos del host/puerto,

@@ -12,4 +12,10 @@ public class ResumenBoletosDto {
     /** Movimientos ENTRADA / SALIDA registrados en total (histórico). */
     private long ingresosTotal;
     private long salidasTotal;
+
+    // Desglose de "dentro" por categoría (particular vs. administrativo/docente
+    // asociado con su ticket QR). dentro = suma de los tres.
+    private long dentroParticulares;
+    private long dentroAdministrativos;
+    private long dentroDocentes;
 }

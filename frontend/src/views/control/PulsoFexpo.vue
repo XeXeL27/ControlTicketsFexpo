@@ -514,16 +514,24 @@ onMounted(async () => {
   // Aforo maximo del recinto: todavia no hay un dato real configurado, se usa
   // un valor de referencia hasta que se defina (ver CLAUDE.md / pendientes).
   const CAP = 5000
-  const st = { dentro: 0, ingresos: 0, salidas: 0, reingresos: 0, ingUlt: [] as { t: number; in: boolean }[] }
+  const st = {
+    dentro: 0, ingresos: 0, salidas: 0, reingresos: 0,
+    // Desglose: administrativos/docentes que entraron con el boleto asociado a
+    // su ticket QR (uno de los 3 por día), aparte de la venta suelta al público.
+    dentroAdministrativos: 0, dentroDocentes: 0,
+    ingUlt: [] as { t: number; in: boolean }[],
+  }
   const vistosEntrada = new Set<string>() // para contar reingresos observados en vivo
 
   function anim(el: HTMLElement) { el.classList.remove('pf-flash'); void el.offsetWidth; el.classList.add('pf-flash') }
 
-  function pintar(codigo: string, tipo: string, tag: string, cls: string) {
+  function pintar(codigo: string, tipo: string, tag: string, cls: string, personaTexto?: string) {
     $('pf-k-dentro').textContent = fmt(st.dentro); anim($('pf-k-dentro'))
     $('pf-k-in').textContent = fmt(st.ingresos)
     $('pf-k-out').textContent = fmt(st.salidas)
     $('pf-k-re').textContent = fmt(st.reingresos)
+    $('pf-k-admin').textContent = fmt(st.dentroAdministrativos)
+    $('pf-k-docente').textContent = fmt(st.dentroDocentes)
     const pct = Math.min(100, Math.round((st.dentro / CAP) * 100))
     const ring = $('pf-ring')
     ring.style.setProperty('--p', String(pct))
@@ -540,7 +548,10 @@ onMounted(async () => {
     const ul = $('pulso-feed')
     const li = document.createElement('li')
     li.className = 'pf-row ' + cls
-    li.innerHTML = `<span class="pf-code">${codigo}</span><span class="pf-tag ${tag}">${tipo}</span>`
+    // Si el boleto es de un administrativo/docente, se muestra quién es en vez
+    // del código pelado (identifica al instante quién entró/salió).
+    const etiqueta = personaTexto ? `${personaTexto} <span class="pf-sub-code">${codigo}</span>` : codigo
+    li.innerHTML = `<span class="pf-code">${etiqueta}</span><span class="pf-tag ${tag}">${tipo}</span>`
     ul.insertBefore(li, ul.firstChild)
     while (ul.children.length > 6) ul.removeChild(ul.lastChild!)
   }
@@ -579,9 +590,16 @@ onMounted(async () => {
       tipoTexto = esReingreso ? 'REINGRESA' : 'INGRESA'
       activarUna()
     }
+    // Desglose administrativos/docentes: +1 en ENTRADA, -1 en SALIDA de ese boleto.
+    if (evento.categoria === 'ADMINISTRATIVO') st.dentroAdministrativos += esSalida ? -1 : 1
+    else if (evento.categoria === 'DOCENTE') st.dentroDocentes += esSalida ? -1 : 1
+
     lanzarPulso(gIdx, g.color)
     st.ingUlt.push({ t: Date.now(), in: !esSalida })
-    pintar(evento.codigo, tipoTexto, esSalida ? 'out' : 'in', esSalida ? 'out' : '')
+    const personaTexto = evento.nombrePersona
+      ? `${evento.nombrePersona} <span class="pf-tag ${evento.categoria === 'DOCENTE' ? 'pf-tag-docente' : 'pf-tag-admin'}">${evento.categoria === 'DOCENTE' ? 'Docente' : 'Admin.'}</span>`
+      : undefined
+    pintar(evento.codigo, tipoTexto, esSalida ? 'out' : 'in', esSalida ? 'out' : '', personaTexto)
   }
 
   function clock() { $('pulso-clock').textContent = new Date().toLocaleTimeString('es-BO') }
@@ -719,12 +737,16 @@ onMounted(async () => {
     st.dentro = res.dentro
     st.ingresos = res.ingresosTotal
     st.salidas = res.salidasTotal
+    st.dentroAdministrativos = res.dentroAdministrativos
+    st.dentroDocentes = res.dentroDocentes
     // Pinta el estado inicial sin animar ninguna puerta en particular.
     const pct = Math.min(100, Math.round((st.dentro / CAP) * 100))
     $('pf-k-dentro').textContent = fmt(st.dentro)
     $('pf-k-in').textContent = fmt(st.ingresos)
     $('pf-k-out').textContent = fmt(st.salidas)
     $('pf-k-re').textContent = fmt(st.reingresos)
+    $('pf-k-admin').textContent = fmt(st.dentroAdministrativos)
+    $('pf-k-docente').textContent = fmt(st.dentroDocentes)
     const ring = $('pf-ring'); ring.style.setProperty('--p', String(pct))
     $('pf-k-aforo').textContent = pct + '%'
     $('pf-k-cap').textContent = 'de ' + fmt(CAP) + ' · libres ' + fmt(Math.max(0, CAP - st.dentro))
@@ -792,6 +814,8 @@ function volver() { router.back() }
         <div class="pf-card"><div class="pf-lbl">Ingresos</div><div class="pf-num" style="font-size:22px;color:var(--pf-cyan)" id="pf-k-in">0</div></div>
         <div class="pf-card"><div class="pf-lbl">Salidas</div><div class="pf-num" style="font-size:22px;color:var(--pf-warn)" id="pf-k-out">0</div></div>
         <div class="pf-card"><div class="pf-lbl">Reingresos</div><div class="pf-num" style="font-size:22px;color:var(--pf-magenta)" id="pf-k-re">0</div></div>
+        <div class="pf-card"><div class="pf-lbl">Administrativos dentro</div><div class="pf-num" style="font-size:22px;color:#c4b5fd" id="pf-k-admin">0</div></div>
+        <div class="pf-card"><div class="pf-lbl">Docentes dentro</div><div class="pf-num" style="font-size:22px;color:#fcd34d" id="pf-k-docente">0</div></div>
       </div>
 
       <div class="pf-bottom">
@@ -885,6 +909,11 @@ function volver() { router.back() }
 .pulso-fexpo .pf-tag.in { color: var(--pf-ok); background: rgba(53,208,127,.12); }
 .pulso-fexpo .pf-tag.out { color: var(--pf-warn); background: rgba(255,176,32,.12); }
 .pulso-fexpo .pf-tag.bad { color: var(--pf-alert); background: rgba(255,77,109,.12); }
+/* Badge junto al nombre en el feed, cuando el boleto es de un administrativo/docente. */
+.pulso-fexpo .pf-code .pf-tag { margin-left: 6px; }
+.pulso-fexpo .pf-tag-admin { color: #c4b5fd; background: rgba(139,92,246,.16); }
+.pulso-fexpo .pf-tag-docente { color: #fcd34d; background: rgba(217,119,6,.18); }
+.pulso-fexpo .pf-sub-code { display: block; font-size: 9.5px; color: var(--pf-faint); font-weight: 500; letter-spacing: 0; }
 
 .pulso-fexpo .pf-hint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: none;
   font-size: 12px; color: var(--pf-soft); background: var(--pf-glass); border: 1px solid var(--pf-line);

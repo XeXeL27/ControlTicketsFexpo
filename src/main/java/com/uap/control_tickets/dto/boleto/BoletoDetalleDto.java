@@ -18,4 +18,16 @@ public class BoletoDetalleDto {
     /** Ultimo movimiento registrado (null si el boleto nunca se validó). */
     private String ultimoTipo;
     private Instant ultimaFecha;
+
+    /**
+     * PARTICULAR (venta suelta, anónimo), ADMINISTRATIVO o DOCENTE — según si este
+     * boleto quedó asociado a un administrativo/docente junto con su ticket QR.
+     */
+    private String categoria;
+    /** Nombre completo del administrativo/docente (null si es PARTICULAR). */
+    private String nombrePersona;
+    /** Código administrativo/docente al que está asociado (null si es PARTICULAR). */
+    private String codigoPersona;
+    /** DIA_1/DIA_2/DIA_3 — a qué día de la feria corresponde (null si es PARTICULAR). */
+    private String diaFeria;
 }

@@ -20,4 +20,14 @@ public interface BoletoService {
 
     /** Lee el CSV y cuenta qué pasaría, SIN escribir nada (para la vista previa). */
     PrevisualizacionBoletoCsvDto previsualizarCsv(MultipartFile archivo);
+
+    /**
+     * Asocia boletos a administrativos: CSV de 4 columnas (código administrativo,
+     * código boleto día 1, día 2, día 3). Se entregan junto con el ticket QR del
+     * administrativo, uno por día de la feria.
+     */
+    ImportacionResultadoDto importarAsociacionAdministrativos(MultipartFile archivo);
+
+    /** Igual que {@link #importarAsociacionAdministrativos}, pero para docentes. */
+    ImportacionResultadoDto importarAsociacionDocentes(MultipartFile archivo);
 }
