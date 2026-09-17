@@ -7,23 +7,29 @@
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
+import ModalDetallePersonaBoletos from '@/components/ModalDetallePersonaBoletos.vue'
 import Alerta from '@/components/Alerta.vue'
 import CsvDropzone from '@/components/CsvDropzone.vue'
 import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
+import { agruparBoletos, type FilaBoletoAgrupada } from '@/utils/boletosAgrupados'
 import {
   crearBoleto,
   eliminarBoleto,
+  importarBoletosAdministrativos,
   importarBoletosCsv,
+  importarBoletosDocentes,
   listarBoletos,
   previsualizarBoletosCsv,
 } from '@/api/boleto.service'
 import type {
   BoletoDetalleDto,
   BoletoDto,
+  DiaFeria,
   PrevisualizacionBoletoCsvDto,
 } from '@/types/boleto.type'
+import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
 import type { ImportacionResultadoDto } from '@/types/estudiante.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
@@ -41,28 +47,51 @@ const resultado = ref<ImportacionResultadoDto | null>(null)
 const previa = ref<PrevisualizacionBoletoCsvDto | null>(null)
 const previsualizando = ref(false)
 
-// Filtro dentro/fuera
+// Filtro dentro/fuera y por categoría
 const filtroEstado = ref<'' | 'dentro' | 'fuera'>('')
+const filtroCategoria = ref<'' | 'PARTICULAR' | 'ADMINISTRATIVO' | 'DOCENTE'>('')
+
+// Asociación a administrativos/docentes (los 3 boletos que se entregan junto
+// con el ticket QR, uno por día). Sin vista previa: son CSV chicos (uno por
+// persona) y el resultado detalla fila por fila qué pasó con cada código.
+const archivoAdmin = ref<File | null>(null)
+const asociandoAdmin = ref(false)
+const resultadoAdmin = ref<ImportacionResultadoDto | null>(null)
+const archivoDocente = ref<File | null>(null)
+const asociandoDocente = ref(false)
+const resultadoDocente = ref<ImportacionResultadoDto | null>(null)
 
 // Modal alta suelta
 const mostrarModal = ref(false)
 const form = ref<BoletoDto>({ codigo: '' })
 const errorForm = ref('')
 
+// Detalle de una persona (administrativo/docente): sus 3 boletos, uno por día.
+const detalleAbierto = ref<FilaBoletoAgrupada | null>(null)
+
 const columnas: ColumnaTabla[] = [
-  { clave: 'codigo', titulo: 'Código', ancho: '180px' },
-  { clave: 'dentro', titulo: 'Estado', ancho: '130px' },
-  { clave: 'ultimoTipo', titulo: 'Último movimiento', ancho: '220px', buscable: false },
+  { clave: 'identificador', titulo: 'Código / Persona', ancho: '260px' },
+  { clave: 'categoria', titulo: 'Categoría', ancho: '140px' },
+  { clave: 'estadoDias', titulo: 'Estado / Días', ancho: '220px', buscable: false, ordenable: false },
+  { clave: 'ultimoTipo', titulo: 'Último movimiento', ancho: '200px', buscable: false },
 ]
 
-const dentroCount = computed(() => boletos.value.filter((b) => b.dentro).length)
-const fueraCount = computed(() => boletos.value.filter((b) => !b.dentro).length)
+// Agrupa: administrativos/docentes en UNA fila por persona (sus 3 boletos
+// adentro), particulares una fila por boleto (como antes).
+const filasAgrupadas = computed<FilaBoletoAgrupada[]>(() => agruparBoletos(boletos.value))
 
-/** Filas que ve la tabla, segun el filtro dentro/fuera (el buscador lo aplica TablaDatos). */
+const dentroCount = computed(() => filasAgrupadas.value.filter((f) => (f.esPersona ? f.algunoDentro : f.dentro)).length)
+const fueraCount = computed(() => filasAgrupadas.value.filter((f) => (f.esPersona ? !f.algunoDentro : !f.dentro)).length)
+const administrativosCount = computed(() => filasAgrupadas.value.filter((f) => f.categoria === 'ADMINISTRATIVO').length)
+const docentesCount = computed(() => filasAgrupadas.value.filter((f) => f.categoria === 'DOCENTE').length)
+
+/** Filas que ve la tabla, segun los filtros (el buscador lo aplica TablaDatos). */
 const filas = computed(() => {
-  if (filtroEstado.value === 'dentro') return boletos.value.filter((b) => b.dentro)
-  if (filtroEstado.value === 'fuera') return boletos.value.filter((b) => !b.dentro)
-  return boletos.value
+  let f = filasAgrupadas.value
+  if (filtroEstado.value === 'dentro') f = f.filter((x) => (x.esPersona ? x.algunoDentro : x.dentro))
+  else if (filtroEstado.value === 'fuera') f = f.filter((x) => (x.esPersona ? !x.algunoDentro : !x.dentro))
+  if (filtroCategoria.value) f = f.filter((x) => x.categoria === filtroCategoria.value)
+  return f
 })
 
 async function cargar() {
@@ -123,6 +152,42 @@ async function importar() {
   }
 }
 
+async function asociarAdministrativos() {
+  if (!archivoAdmin.value) return
+  asociandoAdmin.value = true
+  resultadoAdmin.value = null
+  try {
+    resultadoAdmin.value = await importarBoletosAdministrativos(archivoAdmin.value)
+    archivoAdmin.value = null
+    alertas.exito(
+      `Asociados: ${resultadoAdmin.value.creados + resultadoAdmin.value.actualizados} boleto(s)`,
+    )
+    await cargar()
+  } catch (e) {
+    alertas.error(mensajeError(e, 'Error al asociar los boletos'))
+  } finally {
+    asociandoAdmin.value = false
+  }
+}
+
+async function asociarDocentes() {
+  if (!archivoDocente.value) return
+  asociandoDocente.value = true
+  resultadoDocente.value = null
+  try {
+    resultadoDocente.value = await importarBoletosDocentes(archivoDocente.value)
+    archivoDocente.value = null
+    alertas.exito(
+      `Asociados: ${resultadoDocente.value.creados + resultadoDocente.value.actualizados} boleto(s)`,
+    )
+    await cargar()
+  } catch (e) {
+    alertas.error(mensajeError(e, 'Error al asociar los boletos'))
+  } finally {
+    asociandoDocente.value = false
+  }
+}
+
 function nuevo() {
   form.value = { codigo: '' }
   errorForm.value = ''
@@ -141,21 +206,40 @@ async function guardar() {
   }
 }
 
-async function eliminar(b: BoletoDetalleDto) {
+async function eliminar(idBoleto: number, descripcion: string) {
   const ok = await confirmar({
     titulo: 'Eliminar boleto',
-    mensaje: `¿Eliminar el boleto ${b.codigo}?`,
+    mensaje: `¿Eliminar el boleto ${descripcion}?`,
     textoConfirmar: 'Eliminar',
     peligro: true,
   })
   if (!ok) return
   try {
-    await eliminarBoleto(b.idBoleto)
+    await eliminarBoleto(idBoleto)
     alertas.exito('Boleto eliminado')
+    detalleAbierto.value = null
     await cargar()
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al eliminar'))
   }
+}
+
+function eliminarParticular(fila: FilaBoletoAgrupada) {
+  void eliminar(fila.idBoleto!, fila.codigo!)
+}
+
+function eliminarDelDetalle(idBoleto: number) {
+  if (!detalleAbierto.value) return
+  const dia = detalleAbierto.value.dias?.find((d) => d?.idBoleto === idBoleto)
+  void eliminar(idBoleto, `${dia?.codigo ?? ''} (${detalleAbierto.value.nombrePersona})`)
+}
+
+function verDetalle(fila: FilaBoletoAgrupada) {
+  detalleAbierto.value = fila
+}
+
+function etiquetaCortaDia(dia: DiaFeria) {
+  return ETIQUETA_DIA_FERIA[dia].replace('Día ', '')
 }
 
 function hora(valor?: string) {
@@ -271,40 +355,142 @@ onMounted(cargar)
       </Alerta>
     </div>
 
-    <!-- Tabla reutilizable -->
+    <!-- Asociar boletos a administrativos/docentes: son 3 por persona (uno por
+         día de la feria), entregados junto con su ticket QR. Acá el sistema se
+         entera de qué códigos son, para identificar a esa persona al validar. -->
+    <div class="card" style="margin-bottom:16px">
+      <strong>Asociar a administrativos y docentes</strong>
+      <p class="ayuda">
+        Además de venderse sueltos, algunos boletos ya están físicamente entregados junto al
+        ticket QR de un administrativo o docente (3 por persona: uno por día). Subí acá el CSV
+        para que el sistema sepa a quién identificar cuando se validen esos códigos.
+        4 columnas: <code>código administrativo/docente, código día 18, código día 19, código día 20</code>.
+        Un código de día en blanco se saltea. Si un código ya está asociado a otra persona, esa
+        fila queda marcada como error (no se pisa la asociación existente).
+      </p>
+
+      <div class="asociar-grid">
+        <div>
+          <p class="ayuda" style="margin-top:0"><strong>Administrativos</strong></p>
+          <CsvDropzone v-model="archivoAdmin" :deshabilitado="asociandoAdmin">
+            <template #acciones>
+              <button :disabled="asociandoAdmin || !archivoAdmin" @click="asociarAdministrativos">
+                {{ asociandoAdmin ? 'Asociando...' : 'Asociar' }}
+              </button>
+            </template>
+          </CsvDropzone>
+          <Alerta v-if="resultadoAdmin" :tipo="resultadoAdmin.errores.length ? 'info' : 'exito'"
+            cerrable @cerrar="resultadoAdmin = null" style="margin-top:10px">
+            Filas {{ resultadoAdmin.totalFilas }} · boletos nuevos {{ resultadoAdmin.creados }}
+            · asociados {{ resultadoAdmin.actualizados }}
+            <span v-if="resultadoAdmin.errores.length">· {{ resultadoAdmin.errores.length }} con error</span>
+            <ul v-if="resultadoAdmin.errores.length" style="margin:6px 0 0;padding-left:18px">
+              <li v-for="er in resultadoAdmin.errores" :key="er.fila">Fila {{ er.fila }}: {{ er.motivo }}</li>
+            </ul>
+          </Alerta>
+        </div>
+
+        <div>
+          <p class="ayuda" style="margin-top:0"><strong>Docentes</strong></p>
+          <CsvDropzone v-model="archivoDocente" :deshabilitado="asociandoDocente">
+            <template #acciones>
+              <button :disabled="asociandoDocente || !archivoDocente" @click="asociarDocentes">
+                {{ asociandoDocente ? 'Asociando...' : 'Asociar' }}
+              </button>
+            </template>
+          </CsvDropzone>
+          <Alerta v-if="resultadoDocente" :tipo="resultadoDocente.errores.length ? 'info' : 'exito'"
+            cerrable @cerrar="resultadoDocente = null" style="margin-top:10px">
+            Filas {{ resultadoDocente.totalFilas }} · boletos nuevos {{ resultadoDocente.creados }}
+            · asociados {{ resultadoDocente.actualizados }}
+            <span v-if="resultadoDocente.errores.length">· {{ resultadoDocente.errores.length }} con error</span>
+            <ul v-if="resultadoDocente.errores.length" style="margin:6px 0 0;padding-left:18px">
+              <li v-for="er in resultadoDocente.errores" :key="er.fila">Fila {{ er.fila }}: {{ er.motivo }}</li>
+            </ul>
+          </Alerta>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabla reutilizable: administrativos/docentes van UNA fila por persona
+         (no se repite el nombre); particulares, una fila por boleto. -->
     <TablaDatos
       :columnas="columnas"
       :filas="filas"
-      clave="idBoleto"
+      clave="idFila"
       :cargando="cargando"
       :por-pagina="15"
-      placeholder-busqueda="Buscar por código..."
+      placeholder-busqueda="Buscar por código, persona..."
       texto-vacio="Sin boletos cargados."
     >
       <template #herramientas>
         <select v-model="filtroEstado" style="max-width:200px">
-          <option value="">Todos ({{ boletos.length }})</option>
+          <option value="">Todos ({{ filasAgrupadas.length }})</option>
           <option value="dentro">Dentro ({{ dentroCount }})</option>
           <option value="fuera">Fuera ({{ fueraCount }})</option>
         </select>
+        <select v-model="filtroCategoria" style="max-width:200px">
+          <option value="">Todas las categorías</option>
+          <option value="PARTICULAR">Particulares</option>
+          <option value="ADMINISTRATIVO">Administrativos ({{ administrativosCount }})</option>
+          <option value="DOCENTE">Docentes ({{ docentesCount }})</option>
+        </select>
       </template>
 
-      <template #col-dentro="{ valor }">
-        <span v-if="valor" class="chip" style="background:#dcfce7;color:#166534">Dentro</span>
+      <template #col-identificador="{ fila }">
+        <template v-if="fila.esPersona"><strong>{{ fila.nombrePersona }}</strong> <span style="color:var(--texto-suave)">({{ fila.codigoPersona }})</span></template>
+        <code v-else>{{ fila.codigo }}</code>
+      </template>
+
+      <template #col-categoria="{ valor }">
+        <span v-if="valor === 'PARTICULAR'" class="chip">Particular</span>
+        <span v-else-if="valor === 'ADMINISTRATIVO'" class="chip" style="background:#ede9fe;color:#5b21b6">Administrativo</span>
+        <span v-else class="chip" style="background:#fef3c7;color:#92400e">Docente</span>
+      </template>
+
+      <!-- Particular: chip Dentro/Fuera. Persona: 3 badges de día, uno por
+           color (verde=dentro, gris=fuera, punteado=sin boleto cargado). -->
+      <template #col-estadoDias="{ fila }">
+        <template v-if="fila.esPersona">
+          <div class="dias-badges">
+            <span
+              v-for="(dia, i) in (['DIA_1','DIA_2','DIA_3'] as const)"
+              :key="dia"
+              class="dia-badge"
+              :class="!fila.dias![i] ? 'dia-badge--vacio' : fila.dias![i]!.dentro ? 'dia-badge--dentro' : 'dia-badge--fuera'"
+              :title="!fila.dias![i] ? `${ETIQUETA_DIA_FERIA[dia]}: sin boleto cargado` : `${ETIQUETA_DIA_FERIA[dia]}: ${fila.dias![i]!.dentro ? 'dentro' : 'fuera'}`"
+            >{{ etiquetaCortaDia(dia) }}</span>
+          </div>
+        </template>
+        <span v-else-if="fila.dentro" class="chip" style="background:#dcfce7;color:#166534">Dentro</span>
         <span v-else style="color:var(--texto-suave)">Fuera</span>
       </template>
 
       <template #col-ultimoTipo="{ fila }">
-        <template v-if="fila.ultimoTipo">
-          {{ fila.ultimoTipo }} · {{ hora(fila.ultimaFecha as string) }}
+        <span v-if="fila.esPersona" style="color:var(--texto-suave)">Ver acciones →</span>
+        <template v-else-if="fila.ultimoTipo">
+          {{ fila.ultimoTipo }} · {{ hora(fila.ultimaFecha) }}
         </template>
         <span v-else style="color:var(--texto-suave)">Sin movimientos</span>
       </template>
 
       <template #acciones="{ fila }">
-        <button class="peligro" @click="eliminar(fila)">Eliminar</button>
+        <button v-if="fila.esPersona" class="secundario" @click="verDetalle(fila)">Ver detalle</button>
+        <button v-else class="peligro" @click="eliminarParticular(fila)">Eliminar</button>
       </template>
     </TablaDatos>
+
+    <!-- Detalle de un administrativo/docente: sus 3 boletos (uno por día). -->
+    <ModalDetallePersonaBoletos
+      v-if="detalleAbierto"
+      :nombre-persona="detalleAbierto.nombrePersona!"
+      :codigo-persona="detalleAbierto.codigoPersona!"
+      :categoria="detalleAbierto.categoria as 'ADMINISTRATIVO' | 'DOCENTE'"
+      :dias="detalleAbierto.dias!"
+      permitir-eliminar
+      @cerrar="detalleAbierto = null"
+      @eliminar="eliminarDelDetalle"
+    />
 
     <!-- Modal alta suelta -->
     <ModalBase v-if="mostrarModal" titulo="Nuevo boleto" @cerrar="mostrarModal = false">
@@ -331,4 +517,18 @@ onMounted(cargar)
 }
 .numero { font-size: 22px; font-weight: 700; line-height: 1.1; }
 .etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 2px; }
+.asociar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 800px) { .asociar-grid { grid-template-columns: 1fr; } }
+
+/* Badges de día (18/19/20) para las filas agrupadas por persona: de un
+   vistazo se ve qué días ya usó su boleto, sin repetir el nombre 3 veces. */
+.dias-badges { display: flex; gap: 5px; }
+.dia-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; font-size: 11px; font-weight: 700;
+  border: 1.5px solid transparent;
+}
+.dia-badge--dentro { background: #dcfce7; color: #166534; border-color: #86efac; }
+.dia-badge--fuera { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+.dia-badge--vacio { background: #f8fafc; color: var(--texto-suave); border: 1.5px dashed var(--borde); }
 </style>

@@ -4,6 +4,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { loginApi } from '@/api/auth.service'
+import { rutaInicio } from '@/router'
 import { auth } from '@/store/auth'
 import axios from 'axios'
 
@@ -19,7 +20,7 @@ async function ingresar() {
   try {
     const data = await loginApi({ username: username.value, password: password.value })
     auth.login(data)
-    router.push('/')
+    router.push(rutaInicio())
   } catch (e: unknown) {
     error.value =
       (axios.isAxiosError(e) && e.response?.data?.mensaje) || 'No se pudo iniciar sesion'

@@ -35,14 +35,14 @@ public class TicketController {
 
     @GetMapping("/listar")
     @Operation(summary = "Listar tickets emitidos")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<List<TicketDetalleDto>> listar() {
         return ResponseEntity.ok(ticketService.listar());
     }
 
     @GetMapping("/obtener")
     @Operation(summary = "Obtener un ticket por id")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<TicketDetalleDto> obtener(@RequestParam Long idTicket) {
         return ResponseEntity.ok(ticketService.obtener(idTicket));
     }
@@ -144,7 +144,7 @@ public class TicketController {
     @GetMapping(value = "/{idTicket}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Solo el QR del ticket (PNG)",
             description = "Útil para categorías sin plantilla de ticket todavía (ej. administrativo)")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> qr(@PathVariable Long idTicket) {
         String contenido = ticketService.obtener(idTicket).getQrToken();
         return ResponseEntity.ok()
@@ -154,7 +154,7 @@ public class TicketController {
 
     @GetMapping(value = "/{idTicket}/png", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Ticket relleno (PNG)")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> png(@PathVariable Long idTicket) {
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_PNG)
@@ -163,7 +163,7 @@ public class TicketController {
 
     @GetMapping(value = "/{idTicket}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     @Operation(summary = "Ticket relleno (PDF)")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<byte[]> pdf(@PathVariable Long idTicket) {
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

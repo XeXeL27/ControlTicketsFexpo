@@ -16,4 +16,11 @@ public interface BoletoDao extends JpaRepository<Boleto, Long> {
     long countByEstado(EstadoRegistro estado);
 
     long countByDentroTrueAndEstado(EstadoRegistro estado);
+
+    // Desglose del monitoreo por categoría (particular / administrativo / docente).
+    long countByDentroTrueAndEstadoAndAdministrativoIsNotNull(EstadoRegistro estado);
+
+    long countByDentroTrueAndEstadoAndDocenteIsNotNull(EstadoRegistro estado);
+
+    long countByDentroTrueAndEstadoAndAdministrativoIsNullAndDocenteIsNull(EstadoRegistro estado);
 }

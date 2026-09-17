@@ -25,6 +25,7 @@ import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
 import { validarBoleto } from '@/api/control-boleto.service'
 import type { TipoMovimiento } from '@/types/control.type'
+import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
 import type { ValidacionBoletoDto } from '@/types/boleto.type'
 
 const props = defineProps<{
@@ -102,6 +103,10 @@ async function procesar(codigo: string): Promise<void> {
   }
 }
 
+function etiquetaDia(dia?: string): string {
+  return dia ? (ETIQUETA_DIA_FERIA as Record<string, string>)[dia] ?? dia : ''
+}
+
 function formatearHora(iso?: string): string {
   if (!iso) return '-'
   return new Date(iso).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -173,6 +178,15 @@ defineExpose({ limpiar })
         <span class="resultado-codigo">{{ resultado.codigo }}</span>
       </div>
 
+      <!-- Boleto asociado a un administrativo/docente: quién es, bien visible. -->
+      <p v-if="resultado.categoria !== 'PARTICULAR'" class="persona">
+        <span class="persona-chip" :class="resultado.categoria === 'DOCENTE' ? 'persona-chip--docente' : 'persona-chip--admin'">
+          {{ resultado.categoria === 'DOCENTE' ? 'Docente' : 'Administrativo' }}
+        </span>
+        <strong>{{ resultado.nombrePersona }}</strong>
+        <span v-if="resultado.diaFeria" class="persona-dia">{{ etiquetaDia(resultado.diaFeria) }}</span>
+      </p>
+
       <p v-if="resultado.mensaje" class="motivo">{{ resultado.mensaje }}</p>
 
       <ul class="datos">
@@ -201,6 +215,10 @@ defineExpose({ limpiar })
           <strong class="aviso-titulo">{{ aviso.titulo }}</strong>
           <p class="aviso-texto">{{ aviso.texto }}</p>
           <p class="aviso-codigo">{{ resultado.codigo }}</p>
+          <p v-if="resultado.categoria !== 'PARTICULAR'" class="aviso-codigo">
+            {{ resultado.categoria === 'DOCENTE' ? 'Docente' : 'Administrativo' }}: {{ resultado.nombrePersona }}
+            <template v-if="resultado.diaFeria">— {{ etiquetaDia(resultado.diaFeria) }}</template>
+          </p>
         </div>
       </div>
 
@@ -298,6 +316,19 @@ defineExpose({ limpiar })
 }
 
 .motivo { font-size: 13.5px; color: var(--texto-suave); margin: 6px 0; text-align: center; }
+
+/* Identificación: cuando el boleto es de un administrativo/docente, quién es. */
+.persona {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex-wrap: wrap; margin: 4px 0 0; font-size: 14.5px;
+}
+.persona-chip {
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px;
+}
+.persona-chip--admin { background: #ede9fe; color: #5b21b6; }
+.persona-chip--docente { background: #fef3c7; color: #92400e; }
+.persona-dia { color: var(--texto-suave); font-size: 13px; }
 
 .datos { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .datos li { font-size: 14px; color: var(--texto); display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }

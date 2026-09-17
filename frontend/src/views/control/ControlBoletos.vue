@@ -1,98 +1,50 @@
 <script setup lang="ts">
-// Modulo CONTROL: validación de boletos de la feria. Los boletos NO tienen QR
-// ni foto: solo un código impreso, así que ambos paneles (ENTRADA verde /
-// SALIDA azul) muestran siempre su input, sin cámara ni paso de "abrir". El
-// backend rechaza los duplicados (entrar estando dentro / salir estando
-// fuera). Debajo, un resumen rápido y la tabla de TODOS los boletos con
-// filtro Dentro/Fuera.
+// Módulo CONTROL: pantalla EXCLUSIVA para validar códigos de boleto de la feria.
+// Los boletos NO tienen QR ni foto: solo un código impreso, así que ambos
+// paneles (ENTRADA / SALIDA) muestran siempre su input, sin cámara. El backend
+// rechaza los duplicados (entrar estando dentro / salir estando fuera).
+// La lista completa de boletos vive ahora en "Estado de boletos" (EstadoBoletos.vue).
 //
-// TIEMPO REAL por WebSocket (STOMP, /topic/boletos): cuando CUALQUIER puesto
-// de control valida un código, el evento llega acá al instante y la fila se
-// actualiza en el lugar (sin pedir la lista entera de nuevo). Si se corta la
-// conexión y se reconecta, se resincroniza una vez con una recarga completa
-// por si se perdió algún evento mientras tanto.
-// Pensada para usarse desde el celular en la puerta (ver estilos responsive).
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+// Se mantiene un resumen rápido en vivo (dentro/ingresos/salidas) por WebSocket
+// (STOMP, /topic/boletos) para que el portero tenga contexto sin salir de acá.
+// Pensada para usarse desde el celular en la puerta (estilos responsive).
+import { onMounted, onUnmounted, ref } from 'vue'
 import PanelEscaneoBoleto from '@/components/PanelEscaneoBoleto.vue'
-import TablaDatos from '@/components/TablaDatos.vue'
 import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
-import { listarBoletos } from '@/api/boleto.service'
 import { resumenBoletos } from '@/api/control-boleto.service'
 import { conectarBoletosWs } from '@/api/ws-boletos'
-import type { BoletoDetalleDto, EventoBoletoDto, ResumenBoletosDto } from '@/types/boleto.type'
-import type { ColumnaTabla } from '@/types/tabla.type'
+import type { EventoBoletoDto, ResumenBoletosDto } from '@/types/boleto.type'
 
 const alertas = useAlertas()
-
-const boletos = ref<BoletoDetalleDto[]>([])
-const cargando = ref(false)
 const resumen = ref<ResumenBoletosDto | null>(null)
 const enVivo = ref(false)
 
-// Filtro Todos / Dentro / Fuera (como en la pantalla de carga de Boletos).
-const filtroEstado = ref<'' | 'dentro' | 'fuera'>('')
-const dentroCount = computed(() => boletos.value.filter((b) => b.dentro).length)
-const fueraCount = computed(() => boletos.value.filter((b) => !b.dentro).length)
-const filas = computed(() => {
-  if (filtroEstado.value === 'dentro') return boletos.value.filter((b) => b.dentro)
-  if (filtroEstado.value === 'fuera') return boletos.value.filter((b) => !b.dentro)
-  return boletos.value
-})
-
-const columnas: ColumnaTabla[] = [
-  { clave: 'codigo', titulo: 'Código' },
-  { clave: 'dentro', titulo: 'Estado', ancho: '120px', buscable: false },
-  { clave: 'ultimoTipo', titulo: 'Último movimiento', buscable: false },
-]
-
-async function cargarTodo(): Promise<void> {
-  cargando.value = true
+async function cargarResumen(): Promise<void> {
   try {
-    const [lista, res] = await Promise.all([listarBoletos(), resumenBoletos()])
-    boletos.value = lista
-    resumen.value = res
+    resumen.value = await resumenBoletos()
   } catch (e) {
-    alertas.error(mensajeError(e, 'No se pudo cargar la lista de boletos'))
-  } finally {
-    cargando.value = false
+    alertas.error(mensajeError(e, 'No se pudo cargar el resumen de boletos'))
   }
 }
 
-/**
- * Aplica un evento en vivo directo sobre el estado local (sin pedir la lista
- * de nuevo): la fila del boleto cambia de "Dentro" a "Fuera" (o viceversa) al
- * instante, y los contadores del resumen se actualizan con ella.
- */
+// Actualiza los contadores del resumen en vivo con cada validación (de cualquier
+// puesto), sin volver a pedir nada al servidor.
 function aplicarEvento(evento: EventoBoletoDto): void {
-  if (evento.tipo !== 'ENTRADA' && evento.tipo !== 'SALIDA') return // BLOQUEADO/NO_VALIDO no cambian nada
-
-  const b = boletos.value.find((x) => x.codigo === evento.codigo)
-  if (b) {
-    b.dentro = evento.tipo === 'ENTRADA'
-    b.ultimoTipo = evento.tipo
-    b.ultimaFecha = evento.fechaHora
-  }
-  if (resumen.value) {
-    resumen.value.dentro = evento.dentroAhora
-    if (evento.tipo === 'ENTRADA') resumen.value.ingresosTotal++
-    else resumen.value.salidasTotal++
-  }
-}
-
-function hora(valor?: string) {
-  return valor ? new Date(valor).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'
+  if (evento.tipo !== 'ENTRADA' && evento.tipo !== 'SALIDA') return
+  if (!resumen.value) return
+  resumen.value.dentro = evento.dentroAhora
+  if (evento.tipo === 'ENTRADA') resumen.value.ingresosTotal++
+  else resumen.value.salidasTotal++
 }
 
 let cerrarWs: (() => void) | undefined
 let yaConectoUnaVez = false
 onMounted(() => {
-  void cargarTodo()
+  void cargarResumen()
   cerrarWs = conectarBoletosWs(aplicarEvento, (conectado) => {
     enVivo.value = conectado
-    // Si se reconecta (no es la primera vez), resincroniza por si se perdió
-    // algún evento mientras la conexión estuvo caída.
-    if (conectado && yaConectoUnaVez) void cargarTodo()
+    if (conectado && yaConectoUnaVez) void cargarResumen()
     if (conectado) yaConectoUnaVez = true
   })
 })
@@ -113,7 +65,7 @@ onUnmounted(() => cerrarWs?.())
       </span>
     </div>
 
-    <!-- Resumen rapido -->
+    <!-- Resumen rapido en vivo -->
     <div class="resumen" v-if="resumen">
       <div class="dato">
         <span class="numero" style="color:var(--verde)">{{ resumen.dentro }}</span>
@@ -136,39 +88,6 @@ onUnmounted(() => cerrarWs?.())
     <div class="columnas">
       <PanelEscaneoBoleto tipo="ENTRADA" titulo="Entrada" />
       <PanelEscaneoBoleto tipo="SALIDA" titulo="Salida" />
-    </div>
-
-    <div class="card">
-      <h3>Boletos ({{ boletos.length }})</h3>
-      <TablaDatos
-        :columnas="columnas"
-        :filas="filas"
-        clave="idBoleto"
-        :con-acciones="false"
-        :cargando="cargando"
-        texto-vacio="No hay boletos cargados."
-        placeholder-busqueda="Buscar código..."
-      >
-        <template #herramientas>
-          <select v-model="filtroEstado" style="max-width:200px">
-            <option value="">Todos ({{ boletos.length }})</option>
-            <option value="dentro">Dentro ({{ dentroCount }})</option>
-            <option value="fuera">Fuera ({{ fueraCount }})</option>
-          </select>
-        </template>
-
-        <template #col-dentro="{ valor }">
-          <span v-if="valor" class="chip" style="background:#dcfce7;color:#166534">Dentro</span>
-          <span v-else class="chip" style="background:#eff6ff;color:#1e40af">Fuera</span>
-        </template>
-
-        <template #col-ultimoTipo="{ fila }">
-          <template v-if="fila.ultimoTipo">
-            {{ fila.ultimoTipo }} · {{ hora(fila.ultimaFecha as string) }}
-          </template>
-          <span v-else style="color:var(--texto-suave)">Sin movimientos</span>
-        </template>
-      </TablaDatos>
     </div>
   </div>
 </template>

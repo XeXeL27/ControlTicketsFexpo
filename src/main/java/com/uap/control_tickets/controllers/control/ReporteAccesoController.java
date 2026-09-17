@@ -13,7 +13,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/control/reportes")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+@PreAuthorize("hasRole('ADMINISTRADOR')")
 public class ReporteAccesoController {
     private final ReporteAccesoService service;
 

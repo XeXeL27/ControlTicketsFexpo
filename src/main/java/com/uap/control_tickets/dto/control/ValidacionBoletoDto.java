@@ -28,4 +28,11 @@ public class ValidacionBoletoDto {
 
     /** Hora de la ENTRADA vigente (cuando dentro=true). */
     private Instant entrada;
+
+    /** PARTICULAR, ADMINISTRATIVO o DOCENTE (a qué identifica este boleto). */
+    private String categoria;
+    /** Nombre completo del administrativo/docente identificado (null si es PARTICULAR). */
+    private String nombrePersona;
+    /** DIA_1/DIA_2/DIA_3 (null si es PARTICULAR). */
+    private String diaFeria;
 }

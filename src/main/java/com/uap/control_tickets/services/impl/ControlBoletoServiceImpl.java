@@ -59,7 +59,7 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         Boleto boleto = boletoDao.findByCodigo(cod)
                 .filter(b -> b.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseGet(() -> {
-                    eventos.publicar(evento("NO_VALIDO", cod, "NO_VALIDO"));
+                    eventos.publicar(evento("NO_VALIDO", cod, "NO_VALIDO", null));
                     throw new RecursoNoEncontradoException("Boleto no encontrado o no valido: " + cod);
                 });
 
@@ -67,20 +67,22 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         dto.setIdBoleto(boleto.getIdBoleto());
         dto.setCodigo(boleto.getCodigo());
         dto.setDentro(boleto.isDentro());
+        BoletoServiceImpl.aplicarIdentificacion(boleto, dto::setCategoria, s -> { }, dto::setNombrePersona);
+        if (boleto.getDiaFeria() != null) dto.setDiaFeria(boleto.getDiaFeria().name());
 
         // Anti-clones: el escaner es dedicado, el estado tiene que coincidir.
         if (tipoMovimiento == TipoAcceso.ENTRADA && boleto.isDentro()) {
             dto.setBloqueado(true);
             dto.setMotivo("YA_DENTRO");
             dto.setMensaje("Este boleto ya se encuentra DENTRO del recinto (ENTRADA ya registrada).");
-            eventos.publicar(evento("BLOQUEADO", cod, "YA_DENTRO"));
+            eventos.publicar(evento("BLOQUEADO", cod, "YA_DENTRO", boleto));
             return dto;
         }
         if (tipoMovimiento == TipoAcceso.SALIDA && !boleto.isDentro()) {
             dto.setBloqueado(true);
             dto.setMotivo("YA_FUERA");
             dto.setMensaje("Este boleto no se encuentra DENTRO del recinto (no hay ENTRADA registrada).");
-            eventos.publicar(evento("BLOQUEADO", cod, "YA_FUERA"));
+            eventos.publicar(evento("BLOQUEADO", cod, "YA_FUERA", boleto));
             return dto;
         }
 
@@ -99,7 +101,7 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         dto.setUltimaFecha(mov.getFechaHora());
         if (boleto.isDentro()) dto.setEntrada(mov.getFechaHora());
 
-        eventos.publicar(evento(tipoMovimiento.name(), cod, null));
+        eventos.publicar(evento(tipoMovimiento.name(), cod, null, boleto));
         return dto;
     }
 
@@ -117,6 +119,8 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
                     dto.setIdBoleto(b.getIdBoleto());
                     dto.setCodigo(b.getCodigo());
                     dto.setEntrada(entradas.get(b.getIdBoleto()));
+                    BoletoServiceImpl.aplicarIdentificacion(b, dto::setCategoria, s -> { }, dto::setNombrePersona);
+                    if (b.getDiaFeria() != null) dto.setDiaFeria(b.getDiaFeria().name());
                     return dto;
                 })
                 .toList();
@@ -130,16 +134,24 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         r.setTotalBoletos(boletoDao.countByEstado(EstadoRegistro.ACTIVO));
         r.setIngresosTotal(movimientoBoletoDao.countByTipoAndEstado(TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO));
         r.setSalidasTotal(movimientoBoletoDao.countByTipoAndEstado(TipoAcceso.SALIDA, EstadoRegistro.ACTIVO));
+        // Desglose por categoría, para el monitoreo (Pulso FEXPO).
+        r.setDentroAdministrativos(boletoDao.countByDentroTrueAndEstadoAndAdministrativoIsNotNull(EstadoRegistro.ACTIVO));
+        r.setDentroDocentes(boletoDao.countByDentroTrueAndEstadoAndDocenteIsNotNull(EstadoRegistro.ACTIVO));
+        r.setDentroParticulares(boletoDao.countByDentroTrueAndEstadoAndAdministrativoIsNullAndDocenteIsNull(EstadoRegistro.ACTIVO));
         return r;
     }
 
-    private EventoBoletoDto evento(String tipo, String codigo, String motivo) {
+    private EventoBoletoDto evento(String tipo, String codigo, String motivo, Boleto boleto) {
         EventoBoletoDto e = new EventoBoletoDto();
         e.setTipo(tipo);
         e.setCodigo(codigo);
         e.setMotivo(motivo);
         e.setFechaHora(Instant.now());
         e.setDentroAhora(boletoDao.countByDentroTrueAndEstado(EstadoRegistro.ACTIVO));
+        if (boleto != null) {
+            BoletoServiceImpl.aplicarIdentificacion(boleto, e::setCategoria, s -> { }, e::setNombrePersona);
+            if (boleto.getDiaFeria() != null) e.setDiaFeria(boleto.getDiaFeria().name());
+        }
         return e;
     }
 }

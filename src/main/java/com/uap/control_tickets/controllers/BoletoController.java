@@ -32,14 +32,14 @@ public class BoletoController {
 
     @GetMapping("/listar")
     @Operation(summary = "Listar boletos activos")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<List<BoletoDetalleDto>> listar() {
         return ResponseEntity.ok(boletoService.listar());
     }
 
     @GetMapping("/obtener")
     @Operation(summary = "Obtener un boleto por id")
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<BoletoDetalleDto> obtener(@RequestParam Long idBoleto) {
         return ResponseEntity.ok(boletoService.obtener(idBoleto));
     }
@@ -65,6 +65,24 @@ public class BoletoController {
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<PrevisualizacionBoletoCsvDto> previsualizar(@RequestParam("archivo") MultipartFile archivo) {
         return ResponseEntity.ok(boletoService.previsualizarCsv(archivo));
+    }
+
+    @PostMapping(value = "/importar-administrativos", consumes = "multipart/form-data")
+    @Operation(summary = "Asociar boletos a administrativos (3 por persona, uno por día)",
+            description = "CSV de 4 columnas: código administrativo, código boleto día 1, día 2, día 3. "
+                    + "Una celda de día vacía se saltea (no hace falta tener los 3 todavía). Si el código "
+                    + "de boleto ya está asociado a OTRA persona, esa celda queda como error (no se pisa).")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ImportacionResultadoDto> importarAdministrativos(@RequestParam("archivo") MultipartFile archivo) {
+        return ResponseEntity.ok(boletoService.importarAsociacionAdministrativos(archivo));
+    }
+
+    @PostMapping(value = "/importar-docentes", consumes = "multipart/form-data")
+    @Operation(summary = "Asociar boletos a docentes (3 por persona, uno por día)",
+            description = "Mismo formato que /importar-administrativos, con el código de docente.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ImportacionResultadoDto> importarDocentes(@RequestParam("archivo") MultipartFile archivo) {
+        return ResponseEntity.ok(boletoService.importarAsociacionDocentes(archivo));
     }
 
     @DeleteMapping("/eliminar")

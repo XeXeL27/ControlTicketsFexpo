@@ -11,4 +11,9 @@ public class BoletoDentroDto {
     private String codigo;
     /** Momento en que entro (hora de su ultima ENTRADA registrada). */
     private Instant entrada;
+
+    /** PARTICULAR, ADMINISTRATIVO o DOCENTE. */
+    private String categoria;
+    private String nombrePersona;
+    private String diaFeria;
 }

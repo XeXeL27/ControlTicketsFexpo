@@ -28,3 +28,22 @@ export function previsualizarBoletosCsv(archivo: File) {
   fd.append('archivo', archivo)
   return http.post<PrevisualizacionBoletoCsvDto>('/boletos/previsualizar', fd).then((r) => r.data)
 }
+
+/**
+ * Asocia boletos a administrativos: CSV de 4 columnas (código administrativo,
+ * código boleto día 1, día 2, día 3) — se entregan junto con su ticket QR, uno
+ * por día de la feria. Una celda de día vacía se saltea. Si un código ya está
+ * asociado a OTRA persona, esa celda queda como error (no se pisa).
+ */
+export function importarBoletosAdministrativos(archivo: File) {
+  const fd = new FormData()
+  fd.append('archivo', archivo)
+  return http.post<ImportacionResultadoDto>('/boletos/importar-administrativos', fd).then((r) => r.data)
+}
+
+/** Igual que {@link importarBoletosAdministrativos}, pero para docentes. */
+export function importarBoletosDocentes(archivo: File) {
+  const fd = new FormData()
+  fd.append('archivo', archivo)
+  return http.post<ImportacionResultadoDto>('/boletos/importar-docentes', fd).then((r) => r.data)
+}

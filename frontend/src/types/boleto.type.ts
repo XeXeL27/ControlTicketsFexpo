@@ -1,8 +1,22 @@
-// Tipos de Boleto (venta de entrada a la feria). Boletos anónimos: solo código.
+// Tipos de Boleto (venta de entrada a la feria). La mayoría son anónimos (solo
+// código), pero los 3 que se entregan junto al ticket QR de un administrativo o
+// docente (uno por día) quedan ASOCIADOS: identifican a esa persona al validar.
 import type { TipoMovimiento } from '@/types/control.type'
 
 export interface BoletoDto {
   codigo: string
+}
+
+/** PARTICULAR (venta suelta, anónimo), ADMINISTRATIVO o DOCENTE. */
+export type CategoriaBoleto = 'PARTICULAR' | 'ADMINISTRATIVO' | 'DOCENTE'
+
+/** DIA_1/DIA_2/DIA_3 → los 3 días de la FEXPO (18, 19 y 20 en esta edición). */
+export type DiaFeria = 'DIA_1' | 'DIA_2' | 'DIA_3'
+
+export const ETIQUETA_DIA_FERIA: Record<DiaFeria, string> = {
+  DIA_1: 'Día 18',
+  DIA_2: 'Día 19',
+  DIA_3: 'Día 20',
 }
 
 export interface BoletoDetalleDto {
@@ -13,6 +27,13 @@ export interface BoletoDetalleDto {
   dentro: boolean
   ultimoTipo?: TipoMovimiento
   ultimaFecha?: string
+
+  categoria: CategoriaBoleto
+  /** Nombre completo del administrativo/docente (solo si no es PARTICULAR). */
+  nombrePersona?: string
+  /** Código administrativo/docente asociado (solo si no es PARTICULAR). */
+  codigoPersona?: string
+  diaFeria?: DiaFeria
 }
 
 // Refleja PrevisualizacionBoletoCsvDto: lo que pasaria al importar, sin guardar nada.
@@ -51,12 +72,19 @@ export interface ValidacionBoletoDto {
   ultimaFecha?: string
   /** Hora de la ENTRADA vigente (cuando dentro=true). */
   entrada?: string
+
+  categoria: CategoriaBoleto
+  nombrePersona?: string
+  diaFeria?: DiaFeria
 }
 
 export interface BoletoDentroDto {
   idBoleto: number
   codigo: string
   entrada?: string
+  categoria: CategoriaBoleto
+  nombrePersona?: string
+  diaFeria?: DiaFeria
 }
 
 export interface ResumenBoletosDto {
@@ -64,13 +92,21 @@ export interface ResumenBoletosDto {
   totalBoletos: number
   ingresosTotal: number
   salidasTotal: number
+  /** Desglose de "dentro" por categoría (particular vs. administrativo/docente). */
+  dentroParticulares: number
+  dentroAdministrativos: number
+  dentroDocentes: number
 }
 
-/** Evento en vivo por SSE (EventoBoletoDto). */
+/** Evento en vivo por WebSocket (EventoBoletoDto). */
 export interface EventoBoletoDto {
   tipo: 'ENTRADA' | 'SALIDA' | 'BLOQUEADO' | 'NO_VALIDO'
   codigo: string
   motivo?: string
   fechaHora: string
   dentroAhora: number
+
+  categoria?: CategoriaBoleto
+  nombrePersona?: string
+  diaFeria?: DiaFeria
 }
