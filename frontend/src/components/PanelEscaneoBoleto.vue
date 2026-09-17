@@ -1,20 +1,24 @@
 <script setup lang="ts">
-// Panel de escaneo DEDICADO para boletos de la feria: escaner de ENTRADA o de
-// SALIDA que se abre SOLO al pulsar su boton (para no pedir las dos camaras a
-// la vez). Calcado de PanelEscaneo.vue (tickets de estudiante), simplificado:
-// los boletos son anonimos, no hay foto ni matricula que mostrar.
+// Panel de validación de boletos de la feria: ENTRADA o SALIDA, escáner
+// DEDICADO. Los boletos NO tienen QR ni cámara: solo se pide el código (el
+// que trae impreso el boleto vendido) y se valida contra el backend. Por eso,
+// a diferencia del panel de tickets de estudiante, no hay EscannerQr ni un
+// paso de "abrir cámara": el input queda siempre listo para tipear.
 //
-// - Sin abrir: muestra el boton "Iniciar escaneo de X" (emite `abrir`).
-// - Abierto: camara + respaldo manual + validacion + tarjeta de resultado;
-//   "Detener" vuelve al estado de boton (emite `cerrar`).
-// - El backend decide la validez segun el tipoMovimiento:
-//     ENTRADA estando dentro -> 409 "ya esta dentro" (duplicado).
-//     SALIDA estando fuera   -> 409 "no hay entrada" (duplicado).
-//     codigo inexistente     -> 404.
-// Al terminar cualquier escaneo emite `validado` para refrescar la lista.
-import { computed, ref } from 'vue'
+// La cabecera tiene un color/ícono fuerte (verde+→ para ENTRADA, azul+← para
+// SALIDA) para que se distingan de un vistazo, sobre todo lado a lado en
+// pantallas grandes. Pensado para usarse desde el celular en la puerta:
+// input grande, se re-enfoca solo despues de cada validacion para poder
+// tipear el siguiente codigo enseguida (a mano o con un lector de codigo de
+// barras USB, que para el navegador es indistinguible de tipear + Enter).
+//
+// El backend decide la validez segun el tipoMovimiento:
+//   ENTRADA estando dentro -> 409 "ya esta dentro" (duplicado).
+//   SALIDA estando fuera   -> 409 "no hay entrada" (duplicado).
+//   codigo inexistente     -> 404.
+// Al terminar cualquier validacion emite `validado` para refrescar la lista.
+import { computed, nextTick, ref } from 'vue'
 import axios from 'axios'
-import EscannerQr from '@/components/EscannerQr.vue'
 import Alerta from '@/components/Alerta.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import { useAlertas } from '@/composables/useAlertas'
@@ -26,13 +30,11 @@ import type { ValidacionBoletoDto } from '@/types/boleto.type'
 const props = defineProps<{
   /** ENTRADA o SALIDA. Es un escaner dedicado. */
   tipo: TipoMovimiento
-  /** Titulo del panel (ej: "Escaner de ENTRADA"). */
+  /** Titulo del panel (ej: "Entrada"). */
   titulo?: string
-  /** true = este panel tiene la camara abierta. El padre asegura solo uno. */
-  activo: boolean
 }>()
 
-const emit = defineEmits<{ validado: []; abrir: []; cerrar: [] }>()
+const emit = defineEmits<{ validado: [] }>()
 
 const alertas = useAlertas()
 
@@ -40,11 +42,11 @@ const procesando = ref(false)
 const resultado = ref<ValidacionBoletoDto | null>(null)
 const errorValidacion = ref('')
 const manual = ref('')
+const inputRef = ref<HTMLInputElement | null>(null)
 // Modal de aviso bien visible cuando el movimiento fue rechazado (ya dentro / ya fuera).
 const mostrarAviso = ref(false)
 
-// La camara esta activa solo si el panel esta abierto y no esta validando.
-const escaneando = computed(() => props.activo && !procesando.value)
+const esEntrada = computed(() => props.tipo === 'ENTRADA')
 
 /** Contenido del modal de aviso segun el motivo del rechazo. */
 const aviso = computed(() => {
@@ -64,33 +66,15 @@ const aviso = computed(() => {
   return { titulo: 'MOVIMIENTO DENEGADO', texto: r?.mensaje ?? 'No se pudo registrar el movimiento.' }
 })
 
-// Antirrebote: el mismo codigo leido dos veces en <1.5s se ignora (un solo
-// escaneo fisico puede decodificarse varias veces seguidas).
-let ultimoCodigo = ''
-let ultimoMomento = 0
-
-function alCodigoLeido(codigoTexto: string): void {
-  const codigo = codigoTexto.trim()
-  if (!codigo) return
-  const ahora = Date.now()
-  if (codigo === ultimoCodigo && ahora - ultimoMomento < 1500) return
-  ultimoCodigo = codigo
-  ultimoMomento = ahora
-  void procesar(codigo)
-}
-
 function alEnviarManual(): void {
   const codigo = manual.value.trim()
-  if (!codigo) return
+  if (!codigo || procesando.value) return
   manual.value = ''
-  ultimoCodigo = ''
   void procesar(codigo)
 }
 
 async function procesar(codigo: string): Promise<void> {
-  if (procesando.value) return
-
-  procesando.value = true // apaga la camara mientras se valida
+  procesando.value = true
   resultado.value = null
   errorValidacion.value = ''
   mostrarAviso.value = false
@@ -110,11 +94,11 @@ async function procesar(codigo: string): Promise<void> {
       errorValidacion.value = mensajeError(e, 'No se pudo validar el boleto')
     }
   } finally {
+    procesando.value = false
     emit('validado')
-    // Pequena pausa para que el portero vea el resultado y luego re-escanea.
-    setTimeout(() => {
-      procesando.value = false
-    }, 1200)
+    // Re-enfoca el input para tipear el siguiente codigo enseguida.
+    await nextTick()
+    inputRef.value?.focus()
   }
 }
 
@@ -123,8 +107,7 @@ function formatearHora(iso?: string): string {
   return new Date(iso).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-/** Limpia el resultado de este panel. El padre lo llama al abrir el OTRO
- *  escaner, para que cada escaneo arranque limpio y no queden datos viejos. */
+/** Limpia el resultado de este panel (lo usa el padre si hace falta reiniciar). */
 function limpiar(): void {
   resultado.value = null
   errorValidacion.value = ''
@@ -137,51 +120,54 @@ defineExpose({ limpiar })
 
 <template>
   <section class="card panel" :class="`panel--${tipo.toLowerCase()}`">
-    <header class="cabecera">
-      <h3>{{ titulo ?? `Escaner de ${tipo}` }}</h3>
-      <span v-if="!activo" class="sello" :class="`sello--${tipo.toLowerCase()}`">{{ tipo }}</span>
-      <button v-else class="secundario detener" type="button" @click="emit('cerrar')">Detener</button>
+    <!-- Cabecera con color e ícono fuertes: se distingue de un vistazo cuál es cuál -->
+    <header class="cabecera" :class="`cabecera--${tipo.toLowerCase()}`">
+      <span class="icono" :class="`icono--${tipo.toLowerCase()}`" aria-hidden="true">
+        {{ esEntrada ? '→' : '←' }}
+      </span>
+      <div class="titulo-grupo">
+        <h3>{{ titulo ?? tipo }}</h3>
+        <span class="subtitulo-panel">{{ esEntrada ? 'Registra el ingreso' : 'Registra la salida' }}</span>
+      </div>
     </header>
 
-    <!-- Sin abrir: el boton que inicia el escaner -->
-    <button
-      v-if="!activo"
-      type="button"
-      class="btn-escaneo"
-      :class="`btn--${tipo.toLowerCase()}`"
-      @click="emit('abrir')"
-    >
-      Iniciar escaneo de {{ tipo }}
-    </button>
-
-    <!-- Abierto: camara + respaldo manual -->
-    <template v-else>
-      <EscannerQr :activo="escaneando" @codigo="alCodigoLeido" />
-
-      <div class="manual">
-        <label>O escriba el código del boleto</label>
-        <div class="fila">
-          <input
-            v-model="manual"
-            type="text"
-            placeholder="Código del boleto"
-            autofocus
-            :disabled="procesando"
-            @keyup.enter="alEnviarManual"
-          />
-          <button :disabled="procesando || !manual.trim()" @click="alEnviarManual">Validar</button>
-        </div>
+    <!-- Sin cámara: el boleto no tiene QR, solo se tipea/lee su código -->
+    <div class="manual">
+      <label>Código del boleto</label>
+      <div class="fila">
+        <input
+          ref="inputRef"
+          v-model="manual"
+          type="text"
+          inputmode="text"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          enterkeyhint="done"
+          placeholder="Código del boleto"
+          autofocus
+          :disabled="procesando"
+          @keyup.enter="alEnviarManual"
+        />
+        <button
+          class="btn-validar"
+          :class="`btn--${tipo.toLowerCase()}`"
+          :disabled="procesando || !manual.trim()"
+          @click="alEnviarManual"
+        >
+          {{ procesando ? 'Validando…' : 'Validar' }}
+        </button>
       </div>
+    </div>
 
-      <p v-if="procesando" class="procesando">Validando...</p>
-      <Alerta v-if="errorValidacion" tipo="error" cerrable @cerrar="errorValidacion = ''">
-        {{ errorValidacion }}
-      </Alerta>
-    </template>
+    <Alerta v-if="errorValidacion" tipo="error" cerrable @cerrar="errorValidacion = ''">
+      {{ errorValidacion }}
+    </Alerta>
 
     <!-- Tarjeta de resultado: grande, por color, pensada para leerse de un vistazo -->
     <div v-if="resultado" class="resultado-card">
-      <div class="resultado" :class="resultado.bloqueado ? 'rojo' : tipo === 'ENTRADA' ? 'verde' : 'azul'">
+      <div class="resultado" :class="resultado.bloqueado ? 'rojo' : esEntrada ? 'verde' : 'azul'">
         <span v-if="resultado.bloqueado" class="resultado-titulo">DENEGADO</span>
         <span v-else class="resultado-titulo">{{ tipo }}</span>
         <span class="resultado-codigo">{{ resultado.codigo }}</span>
@@ -226,50 +212,78 @@ defineExpose({ limpiar })
 </template>
 
 <style scoped>
-.panel { display: flex; flex-direction: column; gap: 14px; }
+.panel { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 .panel--entrada { border-top: 4px solid var(--verde); }
 .panel--salida { border-top: 4px solid var(--azul); }
 
-.cabecera { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.sello {
-  padding: 3px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
+/* Cabecera: banda de color + icono circular, para distinguir ENTRADA/SALIDA
+   de un vistazo (sobre todo lado a lado, en pantallas grandes). */
+.cabecera {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: -22px -22px 2px;
+  padding: 18px 22px;
+  border-bottom: 1px solid;
 }
-.sello--entrada { background: #dcfce7; color: #166534; }
-.sello--salida { background: #dbeafe; color: #1e40af; }
-.detener { padding: 6px 14px; font-size: 13px; }
-
-/* Boton que abre el escaner */
-.btn-escaneo {
-  width: 100%;
-  padding: 18px;
-  border-radius: 10px;
-  border: none;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
+.cabecera--entrada { background: linear-gradient(135deg, #ecfdf5, #f7fefb); border-color: #bbf7d0; }
+.cabecera--salida { background: linear-gradient(135deg, #eff6ff, #f7fafe); border-color: #bfdbfe; }
+.icono {
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800; color: #fff;
 }
-.btn--entrada { background: var(--verde); }
-.btn--entrada:hover { background: #15803d; }
-.btn--salida { background: var(--azul); }
-.btn--salida:hover { background: var(--azul-osc); }
+.icono--entrada { background: var(--verde); box-shadow: 0 3px 10px rgba(22,163,74,.35); }
+.icono--salida { background: var(--azul); box-shadow: 0 3px 10px rgba(37,99,235,.35); }
+.titulo-grupo h3 { margin: 0; font-size: 17px; line-height: 1.2; }
+.subtitulo-panel { font-size: 12.5px; color: var(--texto-suave); }
 
 .manual label { display: block; font-size: 13px; color: var(--texto-suave); margin-bottom: 6px; }
-.manual .fila { display: flex; gap: 8px; flex-wrap: wrap; }
-.manual input { flex: 1; min-width: 140px; font-size: 16px; }
+.manual .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+.manual input {
+  flex: 1;
+  min-width: 140px;
+  font-size: 18px;
+  padding: 14px 12px;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+}
+.panel--entrada .manual input:focus { border-color: var(--verde); box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+.panel--salida .manual input:focus { border-color: var(--azul); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
 
-.procesando { color: var(--texto-suave); font-size: 13px; }
+/* Boton "Validar" con peso visual propio: no es un boton generico mas.
+   El padding vertical tiene que igualar al del input (14px), si no queda
+   "aplastado" al lado de un input mas alto. */
+.btn-validar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 26px;
+  font-size: 15px;
+  font-weight: 800;
+  white-space: nowrap;
+  border-radius: 10px;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(15,23,42,.15);
+  transition: transform .12s ease, box-shadow .12s ease, background .15s ease;
+}
+.btn-validar:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(15,23,42,.22); }
+.btn-validar:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(15,23,42,.18); }
+.btn--entrada.btn-validar { background: var(--verde); }
+.btn--entrada.btn-validar:hover:not(:disabled) { background: #15803d; }
+.btn--salida.btn-validar { background: var(--azul); }
+.btn--salida.btn-validar:hover:not(:disabled) { background: var(--azul-osc); }
 
-/* Tarjeta del resultado: grande y de un vistazo */
+/* Tarjeta del resultado: GRANDE, centrada, para leerse de un vistazo desde
+   lejos (el portero no tiene que acercarse a leer letra chica). */
 .resultado-card { margin-top: 2px; }
 .resultado {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 16px 18px;
+  text-align: center;
+  gap: 8px;
+  padding: 20px 18px;
   border-radius: 10px;
   border: 2px solid;
   margin: 6px 0 4px;
@@ -277,13 +291,16 @@ defineExpose({ limpiar })
 .resultado.verde { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
 .resultado.rojo { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
 .resultado.azul { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
-.resultado-titulo { font-weight: 800; font-size: 20px; }
-.resultado-codigo { margin-left: auto; font-family: monospace; font-size: 16px; font-weight: 600; }
+.resultado-titulo { font-weight: 800; font-size: 24px; letter-spacing: 0.5px; }
+.resultado-codigo {
+  font-family: monospace; font-size: 15px; font-weight: 700;
+  background: rgba(255,255,255,.6); padding: 3px 12px; border-radius: 999px;
+}
 
-.motivo { font-size: 13.5px; color: var(--texto-suave); margin: 6px 0; }
+.motivo { font-size: 13.5px; color: var(--texto-suave); margin: 6px 0; text-align: center; }
 
-.datos { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 4px; }
-.datos li { font-size: 14px; color: var(--texto); display: flex; gap: 6px; flex-wrap: wrap; }
+.datos { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.datos li { font-size: 14px; color: var(--texto); display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
 /* Modal de aviso de movimiento rechazado */
 .aviso {
@@ -312,11 +329,17 @@ defineExpose({ limpiar })
 .aviso--ya_dentro { background: #fef2f2; border-color: #dc2626; color: #991b1b; }
 .aviso--ya_fuera { background: #fffbeb; border-color: #d97706; color: #92400e; }
 
+/* El .card global baja su padding a 16px en <=768px: la cabecera tiene que
+   usar el mismo margen negativo o le queda un borde blanco desparejo. */
+@media (max-width: 768px) {
+  .cabecera { margin: -16px -16px 2px; padding: 16px; }
+}
+
 /* Celular: controles tactiles grandes y todo a una columna */
 @media (max-width: 520px) {
   .manual .fila { flex-direction: column; }
-  .manual .fila button { width: 100%; padding: 12px; font-size: 16px; }
-  .btn-escaneo { font-size: 17px; padding: 20px; }
+  .manual .fila input { font-size: 17px; padding: 16px 14px; }
+  .manual .fila .btn-validar { width: 100%; padding: 15px; font-size: 16px; }
   .resultado { flex-direction: column; align-items: flex-start; gap: 4px; }
   .resultado-codigo { margin-left: 0; }
 }

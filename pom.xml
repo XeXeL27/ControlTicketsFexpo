@@ -32,6 +32,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
+		<!-- WebSocket (STOMP): tiempo real para el control de boletos y el monitoreo. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-websocket</artifactId>
+		</dependency>
 
 		<!-- ===== BASE DE DATOS ===== -->
 		<dependency>

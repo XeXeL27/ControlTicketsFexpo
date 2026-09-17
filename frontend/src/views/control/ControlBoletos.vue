@@ -1,52 +1,82 @@
 <script setup lang="ts">
-// Modulo CONTROL: validación de boletos de la feria con escaneres DEDICADOS.
+// Modulo CONTROL: validación de boletos de la feria. Los boletos NO tienen QR
+// ni foto: solo un código impreso, así que ambos paneles (ENTRADA verde /
+// SALIDA azul) muestran siempre su input, sin cámara ni paso de "abrir". El
+// backend rechaza los duplicados (entrar estando dentro / salir estando
+// fuera). Debajo, un resumen rápido y la tabla de TODOS los boletos con
+// filtro Dentro/Fuera.
 //
-// Cada panel (ENTRADA verde / SALIDA azul) arranca con su boton: solo al
-// pulsarlo se abre la camara (un solo escaner activo a la vez, para no pedir
-// las dos camaras). El backend rechaza los duplicados (entrar estando dentro /
-// salir estando fuera). Debajo, un resumen rapido y la lista de boletos
-// actualmente dentro del recinto. Calcado de ControlValidador.vue (tickets de
-// estudiante), sin matricula: los boletos son anonimos.
-import { onMounted, onUnmounted, ref } from 'vue'
+// TIEMPO REAL por WebSocket (STOMP, /topic/boletos): cuando CUALQUIER puesto
+// de control valida un código, el evento llega acá al instante y la fila se
+// actualiza en el lugar (sin pedir la lista entera de nuevo). Si se corta la
+// conexión y se reconecta, se resincroniza una vez con una recarga completa
+// por si se perdió algún evento mientras tanto.
+// Pensada para usarse desde el celular en la puerta (ver estilos responsive).
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import PanelEscaneoBoleto from '@/components/PanelEscaneoBoleto.vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
-import { boletosDentro, resumenBoletos } from '@/api/control-boleto.service'
-import type { BoletoDentroDto, ResumenBoletosDto } from '@/types/boleto.type'
-import type { TipoMovimiento } from '@/types/control.type'
+import { listarBoletos } from '@/api/boleto.service'
+import { resumenBoletos } from '@/api/control-boleto.service'
+import { conectarBoletosWs } from '@/api/ws-boletos'
+import type { BoletoDetalleDto, EventoBoletoDto, ResumenBoletosDto } from '@/types/boleto.type'
+import type { ColumnaTabla } from '@/types/tabla.type'
 
 const alertas = useAlertas()
 
-/** Cual panel tiene la camara abierta (solo uno a la vez). */
-const activo = ref<TipoMovimiento | null>(null)
-
-/** Referencias a los paneles para poder limpiar el resultado del otro. */
-const refEntrada = ref<InstanceType<typeof PanelEscaneoBoleto> | null>(null)
-const refSalida = ref<InstanceType<typeof PanelEscaneoBoleto> | null>(null)
-
-const dentro = ref<BoletoDentroDto[]>([])
-const cargandoDentro = ref(false)
+const boletos = ref<BoletoDetalleDto[]>([])
+const cargando = ref(false)
 const resumen = ref<ResumenBoletosDto | null>(null)
+const enVivo = ref(false)
 
-function abrir(tipo: TipoMovimiento): void {
-  // Al abrir un escaner se limpia el resultado del otro, para que cada
-  // escaneo arranque limpio y no queden datos de la operacion anterior.
-  if (tipo === 'ENTRADA') refSalida.value?.limpiar()
-  else refEntrada.value?.limpiar()
-  activo.value = tipo
-}
+// Filtro Todos / Dentro / Fuera (como en la pantalla de carga de Boletos).
+const filtroEstado = ref<'' | 'dentro' | 'fuera'>('')
+const dentroCount = computed(() => boletos.value.filter((b) => b.dentro).length)
+const fueraCount = computed(() => boletos.value.filter((b) => !b.dentro).length)
+const filas = computed(() => {
+  if (filtroEstado.value === 'dentro') return boletos.value.filter((b) => b.dentro)
+  if (filtroEstado.value === 'fuera') return boletos.value.filter((b) => !b.dentro)
+  return boletos.value
+})
 
-async function cargarDentro(): Promise<void> {
-  cargandoDentro.value = true
+const columnas: ColumnaTabla[] = [
+  { clave: 'codigo', titulo: 'Código' },
+  { clave: 'dentro', titulo: 'Estado', ancho: '120px', buscable: false },
+  { clave: 'ultimoTipo', titulo: 'Último movimiento', buscable: false },
+]
+
+async function cargarTodo(): Promise<void> {
+  cargando.value = true
   try {
-    const [lista, res] = await Promise.all([boletosDentro(), resumenBoletos()])
-    dentro.value = lista
+    const [lista, res] = await Promise.all([listarBoletos(), resumenBoletos()])
+    boletos.value = lista
     resumen.value = res
   } catch (e) {
-    alertas.error(mensajeError(e, 'No se pudo cargar la lista de boletos dentro'))
+    alertas.error(mensajeError(e, 'No se pudo cargar la lista de boletos'))
   } finally {
-    cargandoDentro.value = false
+    cargando.value = false
+  }
+}
+
+/**
+ * Aplica un evento en vivo directo sobre el estado local (sin pedir la lista
+ * de nuevo): la fila del boleto cambia de "Dentro" a "Fuera" (o viceversa) al
+ * instante, y los contadores del resumen se actualizan con ella.
+ */
+function aplicarEvento(evento: EventoBoletoDto): void {
+  if (evento.tipo !== 'ENTRADA' && evento.tipo !== 'SALIDA') return // BLOQUEADO/NO_VALIDO no cambian nada
+
+  const b = boletos.value.find((x) => x.codigo === evento.codigo)
+  if (b) {
+    b.dentro = evento.tipo === 'ENTRADA'
+    b.ultimoTipo = evento.tipo
+    b.ultimaFecha = evento.fechaHora
+  }
+  if (resumen.value) {
+    resumen.value.dentro = evento.dentroAhora
+    if (evento.tipo === 'ENTRADA') resumen.value.ingresosTotal++
+    else resumen.value.salidasTotal++
   }
 }
 
@@ -54,21 +84,19 @@ function hora(valor?: string) {
   return valor ? new Date(valor).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'
 }
 
-// Refresca el resumen cada 20s ademas de cuando se valida algo, por si otro
-// puesto de control (otra pantalla) esta registrando movimientos.
-let temporizador: ReturnType<typeof setInterval> | undefined
+let cerrarWs: (() => void) | undefined
+let yaConectoUnaVez = false
 onMounted(() => {
-  void cargarDentro()
-  temporizador = setInterval(() => void cargarDentro(), 20000)
+  void cargarTodo()
+  cerrarWs = conectarBoletosWs(aplicarEvento, (conectado) => {
+    enVivo.value = conectado
+    // Si se reconecta (no es la primera vez), resincroniza por si se perdió
+    // algún evento mientras la conexión estuvo caída.
+    if (conectado && yaConectoUnaVez) void cargarTodo()
+    if (conectado) yaConectoUnaVez = true
+  })
 })
-onUnmounted(() => {
-  if (temporizador) clearInterval(temporizador)
-})
-
-const columnas = [
-  { clave: 'codigo', titulo: 'Código' },
-  { clave: 'entrada', titulo: 'Entrada' },
-]
+onUnmounted(() => cerrarWs?.())
 </script>
 
 <template>
@@ -77,9 +105,12 @@ const columnas = [
       <div>
         <h2>Control de boletos — Feria</h2>
         <p class="subtitulo">
-          Pulse el botón de ENTRADA o de SALIDA para abrir ese escáner y validar el código del boleto.
+          Escriba el código del boleto en el panel de ENTRADA o de SALIDA y presione Enter para validarlo.
         </p>
       </div>
+      <span class="estado-vivo" :class="{ activo: enVivo }">
+        <span class="punto"></span>{{ enVivo ? 'En vivo' : 'Conectando…' }}
+      </span>
     </div>
 
     <!-- Resumen rapido -->
@@ -103,38 +134,40 @@ const columnas = [
     </div>
 
     <div class="columnas">
-      <PanelEscaneoBoleto
-        ref="refEntrada"
-        tipo="ENTRADA"
-        titulo="Escáner de ENTRADA"
-        :activo="activo === 'ENTRADA'"
-        @abrir="abrir('ENTRADA')"
-        @cerrar="activo = null"
-        @validado="cargarDentro()"
-      />
-      <PanelEscaneoBoleto
-        ref="refSalida"
-        tipo="SALIDA"
-        titulo="Escáner de SALIDA"
-        :activo="activo === 'SALIDA'"
-        @abrir="abrir('SALIDA')"
-        @cerrar="activo = null"
-        @validado="cargarDentro()"
-      />
+      <PanelEscaneoBoleto tipo="ENTRADA" titulo="Entrada" />
+      <PanelEscaneoBoleto tipo="SALIDA" titulo="Salida" />
     </div>
 
     <div class="card">
-      <h3>Boletos dentro del recinto ({{ dentro.length }})</h3>
+      <h3>Boletos ({{ boletos.length }})</h3>
       <TablaDatos
         :columnas="columnas"
-        :filas="dentro"
+        :filas="filas"
         clave="idBoleto"
         :con-acciones="false"
-        :cargando="cargandoDentro"
-        texto-vacio="No hay boletos dentro del recinto."
+        :cargando="cargando"
+        texto-vacio="No hay boletos cargados."
         placeholder-busqueda="Buscar código..."
       >
-        <template #col-entrada="{ valor }">{{ hora(valor ? String(valor) : undefined) }}</template>
+        <template #herramientas>
+          <select v-model="filtroEstado" style="max-width:200px">
+            <option value="">Todos ({{ boletos.length }})</option>
+            <option value="dentro">Dentro ({{ dentroCount }})</option>
+            <option value="fuera">Fuera ({{ fueraCount }})</option>
+          </select>
+        </template>
+
+        <template #col-dentro="{ valor }">
+          <span v-if="valor" class="chip" style="background:#dcfce7;color:#166534">Dentro</span>
+          <span v-else class="chip" style="background:#eff6ff;color:#1e40af">Fuera</span>
+        </template>
+
+        <template #col-ultimoTipo="{ fila }">
+          <template v-if="fila.ultimoTipo">
+            {{ fila.ultimoTipo }} · {{ hora(fila.ultimaFecha as string) }}
+          </template>
+          <span v-else style="color:var(--texto-suave)">Sin movimientos</span>
+        </template>
       </TablaDatos>
     </div>
   </div>
@@ -153,14 +186,26 @@ const columnas = [
 
 .subtitulo { color: var(--texto-suave); margin-top: -10px; font-size: 14px; }
 
+/* Indicador de conexion en vivo: gris "conectando" hasta el primer CONNECT. */
+.estado-vivo {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--texto-suave); background: #f1f5f9; border: 1px solid var(--borde);
+  padding: 6px 12px; border-radius: 999px; flex-shrink: 0;
+}
+.estado-vivo .punto { width: 8px; height: 8px; border-radius: 50%; background: var(--texto-suave); }
+.estado-vivo.activo { color: #166534; background: #ecfdf5; border-color: #a7f3d0; }
+.estado-vivo.activo .punto { background: var(--verde); box-shadow: 0 0 0 3px rgba(22,163,74,.2); }
+
 .resumen { display: flex; gap: 12px; flex-wrap: wrap; }
 .dato {
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
   background: #f8fafc; border: 1px solid var(--borde);
-  border-radius: 10px; padding: 12px 18px; min-width: 120px;
+  border-radius: 10px; padding: 14px 18px;
+  flex: 1 1 130px;
 }
-.numero { font-size: 24px; font-weight: 700; line-height: 1.1; }
-.etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 2px; }
+.numero { font-size: 26px; font-weight: 800; line-height: 1.1; }
+.etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 4px; }
 
 .columnas {
   display: grid;

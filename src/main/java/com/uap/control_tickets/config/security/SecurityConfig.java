@@ -54,7 +54,11 @@ public class SecurityConfig {
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui/index.html",
-            "/swagger-ui.html"
+            "/swagger-ui.html",
+            // El handshake HTTP del WebSocket (STOMP) no lleva header Authorization
+            // (el navegador no lo manda en el upgrade); el JWT se valida en el
+            // frame STOMP CONNECT (ver WebSocketAuthInterceptor), no acá.
+            "/ws/**"
     };
 
     @Bean

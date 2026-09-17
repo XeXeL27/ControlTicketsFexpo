@@ -2,6 +2,8 @@
 // Componente raiz: define el "cascaron" de la app.
 // Si no hay sesion (pantalla de login) muestra solo el contenido.
 // Si hay sesion, muestra la barra superior + menu lateral + la vista actual.
+// El menu esta agrupado por secciones (fases del proyecto). En movil el menu
+// es un cajon desplegable (hamburguesa) con foco atrapado y cierre por ESC.
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { auth } from '@/store/auth'
@@ -52,6 +54,12 @@ function tecladoMenu(evento: KeyboardEvent) {
   }
 }
 
+function cerrarSesion(): void {
+  menuAbierto.value = false
+  auth.logout()
+  router.push('/login')
+}
+
 watch(() => route.fullPath, () => { menuAbierto.value = false })
 onMounted(() => {
   mediaMovil = window.matchMedia('(max-width: 768px)')
@@ -59,12 +67,6 @@ onMounted(() => {
   mediaMovil.addEventListener('change', actualizarPantalla)
 })
 onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
-
-function cerrarSesion(): void {
-  menuAbierto.value = false
-  auth.logout()
-  router.push('/login')
-}
 </script>
 
 <template>
@@ -106,20 +108,36 @@ function cerrarSesion(): void {
           <button type="button" class="secundario" aria-label="Cerrar menú" @click="cerrarMenu">✕</button>
         </div>
         <nav aria-label="Navegación principal" @click="esMovil && ($event.target as HTMLElement).closest('a') && cerrarMenu()">
-        <router-link to="/">Inicio</router-link>
-        <router-link to="/control">Control de acceso</router-link>
-        <router-link to="/personas-dentro">Personas dentro</router-link>
-        <router-link to="/reportes/personas">Reporte de accesos</router-link>
-        <router-link to="/control-boletos">Control de boletos</router-link>
-        <router-link to="/boletos">Boletos</router-link>
-        <router-link to="/estudiantes">Estudiantes</router-link>
-        <router-link to="/administrativos">Administrativos</router-link>
-        <router-link to="/docentes">Docentes</router-link>
-        <router-link to="/impresion">Impresión</router-link>
-        <router-link to="/entrega">Entrega</router-link>
-        <router-link to="/personas">Personas</router-link>
-        <router-link to="/usuarios">Usuarios</router-link>
-        <router-link to="/roles">Roles</router-link>
+          <div class="menu-seccion">
+            <span class="menu-seccion-titulo">Administración</span>
+            <router-link to="/">Inicio</router-link>
+            <router-link to="/personas">Personas</router-link>
+            <router-link to="/usuarios">Usuarios</router-link>
+            <router-link to="/roles">Roles</router-link>
+          </div>
+
+          <div class="menu-seccion">
+            <span class="menu-seccion-titulo">Tickets (QR)</span>
+            <router-link to="/estudiantes">Estudiantes</router-link>
+            <router-link to="/administrativos">Administrativos</router-link>
+            <router-link to="/docentes">Docentes</router-link>
+            <router-link to="/impresion">Impresión</router-link>
+            <router-link to="/entrega">Entrega</router-link>
+          </div>
+
+          <div class="menu-seccion">
+            <span class="menu-seccion-titulo">Control y monitoreo</span>
+            <router-link to="/control">Control de acceso</router-link>
+            <router-link to="/personas-dentro">Personas dentro</router-link>
+            <router-link to="/reportes/personas">Reporte de accesos</router-link>
+          </div>
+
+          <div class="menu-seccion">
+            <span class="menu-seccion-titulo">Boletos de la feria</span>
+            <router-link to="/boletos">Boletos</router-link>
+            <router-link to="/control-boletos">Control de boletos</router-link>
+            <router-link to="/pulso-fexpo">Monitoreo FEXPO</router-link>
+          </div>
         </nav>
       </aside>
 
@@ -163,7 +181,14 @@ function cerrarSesion(): void {
 }
 .menu a:hover { background: #f1f5f9; }
 .menu a.router-link-exact-active { background: var(--azul); color: #fff; }
+/* El contenido es el ÚNICO con scroll (la barra y el menú quedan fijos). */
 .contenido { flex: 1; min-width: 0; padding: 26px; overflow-y: auto; }
+/* Cada grupo del menú y su encabezado. */
+.menu-seccion { display: flex; flex-direction: column; margin-bottom: 14px; }
+.menu-seccion-titulo {
+  margin: 4px 4px 6px; color: var(--texto-suave); font-size: 11px;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
 @media (max-width: 768px) {
   .topbar { padding: 8px 12px; gap: 8px; }
   .marca { flex: 1; gap: 8px; }
