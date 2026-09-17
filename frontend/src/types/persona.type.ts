@@ -17,4 +17,6 @@ export interface PersonaDetalleDto {
   ci: string
   genero?: string
   estado: string
+  /** ESTUDIANTE / ADMINISTRATIVO / DOCENTE / USUARIO / SIN_VINCULO */
+  tipo?: string
 }

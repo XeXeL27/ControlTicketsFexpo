@@ -3,7 +3,7 @@
 // Patron que se repite en todas las vistas CRUD:
 //   cargar() -> listar · abrir modal (nuevo/editar) · guardar() -> crear/actualizar
 //   eliminar() -> baja logica en el backend.
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import Alerta from '@/components/Alerta.vue'
@@ -24,8 +24,38 @@ const { confirmar } = useConfirmacion()
 
 const personas = ref<PersonaDetalleDto[]>([])
 const cargando = ref(false)
+const TIPOS: { valor: string; nombre: string }[] = [
+  { valor: 'ESTUDIANTE', nombre: 'Estudiantes' },
+  { valor: 'ADMINISTRATIVO', nombre: 'Administrativos' },
+  { valor: 'DOCENTE', nombre: 'Docentes' },
+  { valor: 'USUARIO', nombre: 'Usuarios del sistema' },
+  { valor: 'SIN_VINCULO', nombre: 'Sin vínculo' },
+]
+
+/** Etiqueta legible para la columna y el filtro. */
+function etiquetaTipo(tipo?: string) {
+  if (!tipo) return '—'
+  if (tipo === 'USUARIO') return 'Usuario del sistema'
+  if (tipo === 'SIN_VINCULO') return 'Sin vínculo'
+  return tipo.charAt(0) + tipo.slice(1).toLowerCase()
+}
+
+const tipoFiltro = ref('')
+
+/** Cuántas personas hay de cada tipo, para mostrarlo en el desplegable. */
+const conteoPorTipo = computed(() => {
+  const m: Record<string, number> = {}
+  for (const p of personas.value) m[p.tipo ?? 'SIN_VINCULO'] = (m[p.tipo ?? 'SIN_VINCULO'] ?? 0) + 1
+  return m
+})
+
+const personasFiltradas = computed(() =>
+  tipoFiltro.value ? personas.value.filter((p) => p.tipo === tipoFiltro.value) : personas.value,
+)
+
 const columnas: ColumnaTabla[] = [
   { clave: 'nombreCompleto', titulo: 'Nombre completo' },
+  { clave: 'tipo', titulo: 'Tipo', ancho: '160px' },
   { clave: 'ci', titulo: 'CI', ancho: '140px' },
   { clave: 'genero', titulo: 'Genero', ancho: '140px' },
 ]
@@ -116,12 +146,25 @@ onMounted(cargar)
 
     <TablaDatos
       :columnas="columnas"
-      :filas="personas"
+      :filas="personasFiltradas"
       clave="idPersona"
       :cargando="cargando"
       placeholder-busqueda="Buscar..."
       texto-vacio="Sin personas registradas."
     >
+      <template #herramientas>
+        <select v-model="tipoFiltro" aria-label="Filtrar por tipo de persona">
+          <option value="">Todos los tipos ({{ personas.length }})</option>
+          <option v-for="t in TIPOS" :key="t.valor" :value="t.valor">
+            {{ t.nombre }} ({{ conteoPorTipo[t.valor] ?? 0 }})
+          </option>
+        </select>
+      </template>
+
+      <template #col-tipo="{ valor }">
+        <span class="chip">{{ etiquetaTipo(valor as string) }}</span>
+      </template>
+
       <template #acciones="{ fila }">
         <button class="secundario" @click="editar(fila)">Editar</button>
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>

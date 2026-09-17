@@ -61,4 +61,13 @@ public class ControlBoletoController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(controlBoletoService.resumen());
     }
 
+
+    @PostMapping("/cierre-jornada")
+    @Operation(summary = "Cierra la jornada: deja a todos (tickets y boletos) como fuera",
+            description = "Se usa al terminar cada dia de la feria. Evita que un 'dentro' "
+                    + "que quedo colgado ensucie el monitoreo del dia siguiente.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
+    public ResponseEntity<Integer> cerrarJornada() {
+        return ResponseEntity.ok(controlBoletoService.cerrarJornada());
+    }
 }

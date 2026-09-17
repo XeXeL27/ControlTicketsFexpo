@@ -52,4 +52,9 @@ public interface AccesoDao extends JpaRepository<Acceso, Long> {
 
     // Historial global, mas reciente primero (para el panel de monitoreo).
     List<Acceso> findAllByEstadoOrderByFechaHoraDesc(EstadoRegistro estado);
+
+    /** Accesos de un rango (el dia en curso), para los contadores del dia. */
+    long countByTipoAndEstadoAndFechaHoraBetween(
+            com.uap.control_tickets.enums.TipoAcceso tipo, EstadoRegistro estado,
+            java.time.Instant desde, java.time.Instant hasta);
 }

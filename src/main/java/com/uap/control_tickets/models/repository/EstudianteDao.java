@@ -24,4 +24,10 @@ public interface EstudianteDao extends JpaRepository<Estudiante, Long> {
     // Respeta el borrado logico: sirve para saber si la persona ya figura como
     // estudiante ACTIVO, ignorando las filas eliminadas que se van a revivir.
     Optional<Estudiante> findByPersonaIdPersonaAndEstado(Long idPersona, EstadoRegistro estado);
+
+    /** Ids de persona con vinculo activo. Una sola consulta para clasificar el listado. */
+    @org.springframework.data.jpa.repository.Query(
+            "select e.persona.idPersona from Estudiante e where e.estado = :estado")
+    java.util.List<Long> idsPersonaActivas(
+            @org.springframework.data.repository.query.Param("estado") EstadoRegistro estado);
 }

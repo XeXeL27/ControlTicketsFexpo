@@ -20,4 +20,10 @@ public interface UsuarioDao extends JpaRepository<Usuario, Long> {
 
     // Verificar username unico al actualizar (excluye el propio registro).
     boolean existsByUsernameAndIdUsuarioNot(String username, Long idUsuario);
+
+    /** Ids de persona que tienen un usuario del sistema. */
+    @org.springframework.data.jpa.repository.Query(
+            "select u.persona.idPersona from Usuario u where u.estado = :estado")
+    java.util.List<Long> idsPersonaConUsuario(
+            @org.springframework.data.repository.query.Param("estado") com.uap.control_tickets.enums.EstadoRegistro estado);
 }

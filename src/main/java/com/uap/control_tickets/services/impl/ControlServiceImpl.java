@@ -47,6 +47,7 @@ public class ControlServiceImpl implements ControlService {
     private final TicketDao ticketDao;
     private final AccesoDao accesoDao;
     private final ApiService apiService;
+    private final CalendarioFeria calendario;
 
     @Override
     @Transactional
@@ -65,6 +66,14 @@ public class ControlServiceImpl implements ControlService {
                         "Ticket no encontrado o no valido: " + qr));
 
         ValidacionTicketDto dto = armarRespuestaConDatosLocales(ticket);
+
+        // El ticket vale las tres noches. Si el flag 'dentro' quedo en true de un dia
+        // ANTERIOR, la persona se fue sin escanear la salida: hoy esta afuera. Sin esto
+        // el anti-clones la rechazaria con YA_DENTRO y no podria entrar nunca mas.
+        if (ticket.isDentro() && esDentroVencido(ticket)) {
+            ticket.setDentro(false);
+            dto.setDentro(false);
+        }
 
         // Anti-clones: el escaner es dedicado, el estado tiene que coincidir.
         if (tipoMovimiento == TipoAcceso.ENTRADA && ticket.isDentro()) {
@@ -162,6 +171,17 @@ public class ControlServiceImpl implements ControlService {
     }
 
     // ---------------- helpers ----------------
+
+    /**
+     * ¿El 'dentro' de este ticket es de un dia anterior (quedo colgado)?
+     * Se mira el ultimo movimiento registrado: si fue ayer o antes, el flag esta viejo.
+     */
+    private boolean esDentroVencido(Ticket ticket) {
+        return accesoDao.findTopByTicketIdTicketOrderByFechaHoraDesc(ticket.getIdTicket())
+                .map(a -> calendario.esDeUnDiaAnterior(a.getFechaHora()))
+                // Sin movimientos pero con dentro=true: es un estado incoherente, se limpia.
+                .orElse(true);
+    }
 
     /** Carga nombre, CI y los datos propios segun la categoria (todo de BD local). */
     private ValidacionTicketDto armarRespuestaConDatosLocales(Ticket ticket) {

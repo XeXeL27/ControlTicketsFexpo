@@ -247,6 +247,8 @@ Pendiente:
 - **Monitoreo en tiempo real**: ya existe `GET /api/control/dentro` (lista de
   quienes tienen `dentro=true`), pero sin push. Decisión pendiente entre SSE o polling.
 
+- **Validaciones de jornada (hechas y verificadas)**. Ver §8.2.
+
 ---
 
 ## 3. Stack tecnológico
@@ -501,9 +503,14 @@ Claves importantes del perfil `jarv`:
 - Backend `server.port=9600`, CORS permite `http://localhost:5900`.
 - `app.admin.username` / `app.admin.password`: credenciales del admin inicial.
 - `sigse.url` / `sigse.api-key`: API de matrícula. Sin ellas el escáner no deja
-  entrar a ningún estudiante. ⚠️ Hoy están escritas en el `application.properties`
-  **base, que sí está en git** (desde el commit `cfc8aa2`), a diferencia del resto de
-  secretos; lo correcto sería moverlas al properties local o a variables de entorno.
+  entrar a ningún estudiante. Ya **no** están en el properties versionado: ahí figuran
+  como `${SIGSE_URL:}` / `${SIGSE_API_KEY:}` y los valores reales viven en el
+  properties local (ignorado) o en variables de entorno. El `:` final hace que, si la
+  variable no existe, quede vacío en vez de romper el arranque.
+  > ⚠️ **La clave estuvo en git desde `cfc8aa2` (2026-09-15) y sigue en el historial**
+  > de `origin/main` y `origin/control`. Sacarla del archivo no la borra de ahí:
+  > **hay que pedir a la UAP que la rote**. En el servidor hay que exportar
+  > `SIGSE_URL` y `SIGSE_API_KEY` al desplegar, o el escáner bloquea a todo estudiante.
 - `app.biometria.simulacion` (base, default `false`): en `true` el módulo de huellas
   usa datos inventados en vez de la red, para probar barra + reporte sin equipo.
 
@@ -613,6 +620,8 @@ previa de las pantallas de estudiantes y administrativos.
   `error.response.data` (el comentario de `control.service.ts` todavía dice 400 para
   los duplicados; el backend manda 409).
 - `GET /dentro` — personas con `dentro=true`.
+- `POST /api/control/boletos/cierre-jornada` — deja a todos (tickets y boletos) fuera.
+  Se usa al cerrar cada día; ver §8.2.
 - `GET /sigse/{ru}` — consulta de matrícula en SIGSE sin tocar la BD (siempre
   devuelve los datos, matriculado o no).
 - `GET /api/validacion/informacion/{ru}` — controller `Api` del paquete
@@ -666,6 +675,59 @@ Detalles de implementación (`TicketRenderer.pdfPliegoEstudiantes`):
   Si se intercambian `largo` y `alto` ahí, los tickets salen deformados y encimados.
 - Los tickets se marcan impresos **después** de que el PDF se generó bien, para que
   un fallo a mitad de camino no los deje marcados sin haberse impreso.
+
+---
+
+## 8.2 Validaciones de jornada (día de feria y `dentro` colgado)
+
+**Modelo (confirmado con Javier, no cambiarlo):** el **ticket** es el ingreso al
+concierto y vale **las tres noches** — se perfora físicamente por día, por eso el
+estudiante NO lleva boletos. El **boleto** es el ingreso a la feria, uno por día.
+Solo administrativos y docentes reciben ticket + 3 boletos; se imprimieron por
+separado y se unen en el sistema con
+`POST /api/boletos/importar-administrativos|docentes` (CSV: código de persona +
+los 3 códigos de boleto). Por eso `boleto` tiene FK a `administrativo`/`docente`
+y **no** a `ticket` ni a `estudiante`: está bien así.
+
+### El `dentro` colgado (lo que rompía el evento)
+
+`dentro` es un booleano sin fecha. Si alguien entra una noche y se retira **sin
+escanear la salida**, queda en `true` para siempre y al día siguiente el anti-clones
+lo rechaza con `YA_DENTRO`: no puede entrar nunca más. Con el ticket valiendo tres
+noches, le pasaba a cualquiera que saliera por una puerta sin control.
+
+Resuelto en los dos validadores (`ControlServiceImpl` y `ControlBoletoServiceImpl`):
+antes de aplicar el anti-clones se mira el **último movimiento**; si es de un día
+anterior, el flag está viejo y se limpia. **El anti-clones del mismo día sigue
+intacto** (verificado: reingreso al día siguiente → 200; duplicado el mismo día → 409).
+Además `POST /api/control/boletos/cierre-jornada` fuerza el reseteo de todos
+(tickets y boletos) al terminar el día.
+
+### Día del boleto
+
+`CalendarioFeria` + `FeriaProperties` (`app.feria.dia1|dia2|dia3`,
+`validar-dia`, `zona-horaria`) son **el único lugar que sabe de fechas**. Al ENTRAR,
+un boleto con `diaFeria` solo pasa si hoy es su día:
+- hoy no es día de feria → 409 **`FUERA_DE_FECHA`**
+- es otro día → 409 **`DIA_INCORRECTO`** (el mensaje dice de qué día es y qué día es hoy)
+- boletos de **venta suelta** (`diaFeria = null`) no se validan por día.
+
+> ⚠️ `validar-dia=false` en el perfil local **a propósito**: con la validación
+> encendida no se puede probar nada fuera del 18-20. En producción va en `true`.
+>
+> **Para otros colaboradores:** el `application.properties` base trae
+> `validar-dia=true`, y un perfil local que no defina `app.feria.*` hereda ese valor.
+> Resultado: fuera del 18-20 **todos los boletos con día asignado rebotan con
+> `FUERA_DE_FECHA`** (los de venta suelta pasan), y parece un bug. Cada uno tiene que
+> poner `app.feria.validar-dia=false` en **su** properties local para desarrollar.
+> La zona horaria importa: los movimientos se guardan en UTC y sin
+> `America/La_Paz` un escaneo de las 21:00 contaría como del día siguiente.
+
+### Contadores del día
+
+`resumen()` sumaba todo el evento, así que el día 2 el tablero mostraba los ingresos
+del día 1. Ahora devuelve además `ingresosHoy`, `salidasHoy`, `diaHoy` y `fechaHoy`
+(los `...Total` siguen siendo acumulados).
 
 ---
 

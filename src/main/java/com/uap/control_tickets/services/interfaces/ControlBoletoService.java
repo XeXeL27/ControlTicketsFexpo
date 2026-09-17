@@ -31,4 +31,14 @@ public interface ControlBoletoService {
 
     /** Foto del estado actual, para pintar el monitoreo al abrir la pantalla. */
     ResumenBoletosDto resumen();
+
+    /**
+     * Cierra la jornada: deja a TODOS (tickets y boletos) como fuera del recinto.
+     * El sistema ya limpia solo el 'dentro' que quedo de un dia anterior cuando la
+     * persona vuelve a escanear; esto es el boton manual para dejar los contadores
+     * en cero al terminar el dia, sin esperar al proximo escaneo.
+     *
+     * @return cuantos tickets y boletos se pusieron en fuera.
+     */
+    int cerrarJornada();
 }

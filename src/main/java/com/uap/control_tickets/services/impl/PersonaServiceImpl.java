@@ -3,6 +3,11 @@ package com.uap.control_tickets.services.impl;
 import com.uap.control_tickets.dto.persona.PersonaDetalleDto;
 import com.uap.control_tickets.dto.persona.PersonaDto;
 import com.uap.control_tickets.enums.EstadoRegistro;
+import com.uap.control_tickets.enums.TipoPersona;
+import com.uap.control_tickets.models.repository.AdministrativoDao;
+import com.uap.control_tickets.models.repository.DocenteDao;
+import com.uap.control_tickets.models.repository.EstudianteDao;
+import com.uap.control_tickets.models.repository.UsuarioDao;
 import com.uap.control_tickets.enums.Genero;
 import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
@@ -14,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * CRUD de Persona.
@@ -30,14 +36,43 @@ import java.util.List;
 public class PersonaServiceImpl implements PersonaService {
 
     private final PersonaDao personaDao;
+    private final EstudianteDao estudianteDao;
+    private final AdministrativoDao administrativoDao;
+    private final DocenteDao docenteDao;
+    private final UsuarioDao usuarioDao;
 
     @Override
     @Transactional(readOnly = true)
     public List<PersonaDetalleDto> listar() {
+        // Se clasifica con 4 consultas de ids y no una por persona: con miles de
+        // registros, preguntar de a uno haria la pantalla inusable.
+        Set<Long> estudiantes = Set.copyOf(estudianteDao.idsPersonaActivas(EstadoRegistro.ACTIVO));
+        Set<Long> administrativos = Set.copyOf(administrativoDao.idsPersonaActivas(EstadoRegistro.ACTIVO));
+        Set<Long> docentes = Set.copyOf(docenteDao.idsPersonaActivas(EstadoRegistro.ACTIVO));
+        Set<Long> conUsuario = Set.copyOf(usuarioDao.idsPersonaConUsuario(EstadoRegistro.ACTIVO));
+
         return personaDao.findAllByEstado(EstadoRegistro.ACTIVO)
                 .stream()
-                .map(this::toDetalleDto)
+                .map(p -> {
+                    PersonaDetalleDto dto = toDetalleDto(p);
+                    dto.setTipo(clasificar(p.getIdPersona(), estudiantes, administrativos,
+                            docentes, conUsuario).name());
+                    return dto;
+                })
                 .toList();
+    }
+
+    /**
+     * Primer vinculo que aplique, en orden de interes.
+     * Una persona puede ser docente Y tener usuario; se muestra como DOCENTE.
+     */
+    private TipoPersona clasificar(Long id, Set<Long> estudiantes, Set<Long> administrativos,
+                                   Set<Long> docentes, Set<Long> conUsuario) {
+        if (estudiantes.contains(id)) return TipoPersona.ESTUDIANTE;
+        if (administrativos.contains(id)) return TipoPersona.ADMINISTRATIVO;
+        if (docentes.contains(id)) return TipoPersona.DOCENTE;
+        if (conUsuario.contains(id)) return TipoPersona.USUARIO;
+        return TipoPersona.SIN_VINCULO;
     }
 
     @Override

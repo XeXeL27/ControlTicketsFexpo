@@ -57,11 +57,12 @@ public class AdminInitializer implements ApplicationRunner {
      * - ADMINISTRADOR: gestiona todo.
      * - CONTROL_CONCIERTO: valida boletos al ingreso del concierto + monitoreo.
      * - CONTROL_FERIA: valida boletos de la feria.
+     * - VENTA_FERIA: registra que boletos de su talonario se vendieron (no toca la puerta).
      * (El antiguo rol CONTROL quedó reemplazado por los dos de arriba; si existe
      * en la BD de una instalación previa, se deja pero ya no se usa.)
      */
     private void inicializarRoles() {
-        List<String> rolesPorDefecto = List.of("ADMINISTRADOR", "CONTROL_CONCIERTO", "CONTROL_FERIA");
+        List<String> rolesPorDefecto = List.of("ADMINISTRADOR", "CONTROL_CONCIERTO", "CONTROL_FERIA", "VENTA_FERIA");
         for (String nombreRol : rolesPorDefecto) {
             if (rolDao.findByNombre(nombreRol).isEmpty()) {
                 Rol rol = new Rol();

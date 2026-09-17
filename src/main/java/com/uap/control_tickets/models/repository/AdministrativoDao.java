@@ -26,4 +26,10 @@ public interface AdministrativoDao extends JpaRepository<Administrativo, Long> {
     boolean existsByCodigoAdministrativoAndIdAdministrativoNot(String codigo, Long idAdministrativo);
 
     boolean existsByPersonaIdPersona(Long idPersona);
+
+    /** Ids de persona con vinculo activo. Una sola consulta para clasificar el listado. */
+    @org.springframework.data.jpa.repository.Query(
+            "select e.persona.idPersona from Administrativo e where e.estado = :estado")
+    java.util.List<Long> idsPersonaActivas(
+            @org.springframework.data.repository.query.Param("estado") EstadoRegistro estado);
 }
