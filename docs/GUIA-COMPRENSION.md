@@ -164,7 +164,7 @@ El frontend está en **TypeScript** y sigue las convenciones de escuela-tecnica:
   `localStorage` (para sobrevivir a F5). Expone `autenticado` y `tieneRol()`.
 - `src/router/index.ts`: define las páginas y un **guard** que bloquea las rutas
   privadas si no hay sesión.
-- `vite.config.ts`: el **proxy** reenvía `/api` al backend en `:9600` (evita CORS
+- `vite.config.ts`: el **proxy** reenvía `/api` al backend en `:9099` (evita CORS
   en desarrollo) y define el alias `@` → `src`.
 - Las vistas (`views/*.vue`, con `<script setup lang="ts">`) siguen el mismo patrón:
   `cargar()` (GET) → tabla → modal para crear/editar → `guardar()` (POST/PUT) →

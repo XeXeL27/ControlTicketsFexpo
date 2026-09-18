@@ -436,12 +436,12 @@ PGPASSWORD=<clave> psql -h 127.0.0.1 -U <usuario> -d postgres -c "CREATE DATABAS
 > regla del `pg_hba` y fallar. Ojo que hay 4 clusters instalados (12, 16, 17, 18);
 > el que usa el proyecto es el del puerto del properties (5432 = v16).
 
-### Backend (puerto 9600)
+### Backend (puerto 9099)
 ```
 cd ~/Descargas/control-tickets   # raíz real del proyecto en esta máquina
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=jarv
 ```
-- Swagger: http://localhost:9600/swagger-ui.html
+- Swagger: http://localhost:9099/swagger-ui.html
 - Usuario inicial: el que definan `app.admin.username` / `app.admin.password`
   en `application-jarv.properties` (ese archivo no está en el repo).
 
@@ -456,7 +456,7 @@ Otros comandos de build/verificación (Maven wrapper):
 
 > **El perfil `jarv` no es opcional.** `application.properties` apunta a una BD de
 > relleno (`.../NOMBRE_BD`), con usuario/clave vacíos, `ddl-auto=validate` y puerto
-> 8080; sin `-Dspring-boot.run.profiles=jarv` el arranque falla. Lo mismo vale para el jar: `java -jar target/*.jar --spring.profiles.active=jarv`.
+> 9099; sin `-Dspring-boot.run.profiles=jarv` el arranque falla. Lo mismo vale para el jar: `java -jar target/*.jar --spring.profiles.active=jarv`.
 
 > `.vscode/launch.json` (config "Spring Boot-ControlTicketsApplication") apunta a un
 > `envFile` `${workspaceFolder}/.env` que **no existe** y no fija el perfil, así que
@@ -472,10 +472,10 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
 ```
 - App: http://localhost:5900
 - **El backend tiene que estar levantado**: `vite.config.ts` proxea `/api` →
-  `http://localhost:9600`, y `api/http.ts` usa `baseURL: '/api'` (relativo). No hay
-  variable de entorno con la URL del backend; si se cambia el puerto 9600 hay que
-  tocar el proxy. En producción el frontend debe servirse detrás de algo que
-  mapee `/api` al backend.
+  `http://localhost:9099`, y `api/http.ts` usa `baseURL: '/api'` (relativo). No hay
+  variable de entorno con la URL del backend; si se cambia el puerto 9099 hay que
+  tocar el proxy. Con el jar de producción (`-Pproduccion`) no hace falta: front y
+  API salen del mismo puerto.
 - **`vite.config.js` y `vite.config.d.ts` no se editan a mano**: los emite
   `vue-tsc -b` desde `vite.config.ts` (porque `tsconfig.node.json` es `composite`
   sin `noEmit`) y están versionados. Vite carga el **`.js` antes que el `.ts`**, así
@@ -555,7 +555,7 @@ Claves importantes del perfil `jarv`:
 - BD: `jdbc:postgresql://localhost:5432/bd_control_tickets_v1`; usuario y clave
   salen del properties local, **no se escriben acá**.
 - `ddl-auto=update` (Hibernate crea/actualiza tablas en desarrollo).
-- Backend `server.port=9600`, CORS permite `http://localhost:5900`.
+- Backend `server.port=9099`, CORS permite `http://localhost:5900`.
 - `app.admin.username` / `app.admin.password`: credenciales del admin inicial.
 - `sigse.url` / `sigse.api-key`: API de matrícula. Sin ellas el escáner no deja
   entrar a ningún estudiante. Ya **no** están en el properties versionado: ahí figuran

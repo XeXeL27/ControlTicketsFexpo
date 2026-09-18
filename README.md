@@ -5,11 +5,11 @@ externos, con monitoreo en tiempo real de quién está dentro.
 
 ## Arranque rápido
 
-**Backend** (puerto 9600):
+**Backend** (puerto 9099):
 ```
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=jarv
 ```
-Swagger: http://localhost:9600/swagger-ui.html
+Swagger: http://localhost:9099/swagger-ui.html
 
 El usuario administrador inicial se define en `src/main/resources/application-jarv.properties`
 (`app.admin.username` / `app.admin.password`). Ese archivo **no está en el repo**:
