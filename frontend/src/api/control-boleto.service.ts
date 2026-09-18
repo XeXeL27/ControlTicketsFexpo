@@ -1,7 +1,13 @@
 // Servicio del validador de boletos de la feria (escaneres dedicados).
 // El tiempo real (control + monitoreo) va por WebSocket: ver ws-boletos.ts.
 import http from '@/api/http'
-import type { BoletoDentroDto, ResumenBoletosDto, ValidacionBoletoDto } from '@/types/boleto.type'
+import type {
+  BoletoDentroDto,
+  RegistroSalidaDetalleDto,
+  RegistroSalidaDto,
+  ResumenBoletosDto,
+  ValidacionBoletoDto,
+} from '@/types/boleto.type'
 import type { TipoMovimiento } from '@/types/control.type'
 
 /**
@@ -31,4 +37,33 @@ export async function boletosDentro(signal?: AbortSignal): Promise<BoletoDentroD
 export async function resumenBoletos(signal?: AbortSignal): Promise<ResumenBoletosDto> {
   const res = await http.get<ResumenBoletosDto>('/control/boletos/resumen', { signal, timeout: 8000 })
   return res.data
+}
+
+/**
+ * Registra los datos del visitante que dijo que va a volver.
+ * Se llama DESPUÉS de la salida: la salida ya quedó registrada y este paso no
+ * puede hacerla fallar.
+ */
+export function registrarSalida(dto: RegistroSalidaDto) {
+  return http
+    .post<RegistroSalidaDetalleDto>('/control/boletos/registro-salida', dto, { timeout: 20000 })
+    .then((r) => r.data)
+}
+
+/**
+ * Descarga la foto guardada de un registro de salida.
+ * Viene de una carpeta del servidor, no de la base, y el endpoint exige token:
+ * por eso se pide como blob y se arma un objectURL, igual que los PNG/PDF de los
+ * tickets. Devuelve null si ese registro no tiene foto.
+ *
+ * Ojo: quien la use tiene que hacer `URL.revokeObjectURL` al descartarla.
+ */
+export function fotoDeRegistro(idRegistro: number): Promise<string | null> {
+  return http
+    .get('/control/boletos/registro-salida/foto', {
+      params: { idRegistro },
+      responseType: 'blob',
+    })
+    .then((r) => URL.createObjectURL(r.data as Blob))
+    .catch(() => null)
 }

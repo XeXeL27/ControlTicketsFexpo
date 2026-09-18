@@ -91,7 +91,7 @@ async function cargar() {
   cargando.value = true
   error.value = ''
   try {
-    talonarios.value = await listarTalonarios(undefined, true)
+    talonarios.value = await listarTalonarios(undefined, undefined, true)
     if (talonarios.value.length && !seleccionado.value) {
       await elegir(talonarios.value[0])
     } else if (seleccionado.value) {
@@ -213,7 +213,7 @@ onMounted(cargar)
         @click="elegir(t)"
       >
         <strong>{{ t.nombre }}</strong>
-        <small>{{ t.tipoEtiqueta }} · {{ t.vendidos }}/{{ t.cantidad }}</small>
+        <small>{{ t.destinoEtiqueta }} · {{ t.tipoEtiqueta }} · {{ t.vendidos }}/{{ t.cantidad }}</small>
       </button>
     </div>
 
@@ -224,7 +224,7 @@ onMounted(cargar)
           <div>
             <strong class="nombre">{{ seleccionado.nombre }}</strong>
             <div class="sub">
-              {{ seleccionado.tipoEtiqueta }} · números
+              {{ seleccionado.destinoEtiqueta }} · {{ seleccionado.tipoEtiqueta }} · números
               {{ seleccionado.numeroDesde }} al {{ seleccionado.numeroHasta }}
             </div>
           </div>

@@ -1,5 +1,6 @@
 package com.uap.control_tickets.dto.talonario;
 
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.TipoTalonario;
 import jakarta.validation.constraints.*;
 import lombok.Data;
@@ -14,6 +15,9 @@ import java.math.BigDecimal;
 @Data
 public class GeneracionTalonariosDto {
 
+    @NotNull(message = "Indique el destino (concierto, feria o parqueo)")
+    private DestinoTalonario destino;
+
     @NotNull(message = "Indique el tipo (evento 1/2/3 o combo)")
     private TipoTalonario tipo;
 
@@ -25,7 +29,7 @@ public class GeneracionTalonariosDto {
     @Max(value = 10000, message = "Máximo 10000 boletos por talonario")
     private Integer boletosPorTalonario;
 
-    /** Desde qué número arranca el primero. Si va null, sigue al último del tipo. */
+    /** Desde qué número arranca el primero. Si va null, sigue al último de ese (destino, tipo). */
     private Integer numeroInicial;
 
     /** Prefijo del nombre: "Talonario" -> "Talonario 1", "Talonario 2"... */

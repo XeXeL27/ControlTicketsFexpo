@@ -12,6 +12,9 @@ public class TalonarioDetalleDto {
 
     private Long idTalonario;
     private String nombre;
+    /** Destino y tipo viajan como nombre del enum + etiqueta legible, igual que el resto. */
+    private String destino;
+    private String destinoEtiqueta;
     private String tipo;
     private String tipoEtiqueta;
     private Integer numeroDesde;

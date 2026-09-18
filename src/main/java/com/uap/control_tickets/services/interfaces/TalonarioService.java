@@ -1,6 +1,7 @@
 package com.uap.control_tickets.services.interfaces;
 
 import com.uap.control_tickets.dto.talonario.*;
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.TipoTalonario;
 
 import java.util.List;
@@ -9,7 +10,13 @@ import java.util.List;
 public interface TalonarioService {
 
     /** Talonarios con su avance de ventas. Si soloMios, acota a los del usuario logueado. */
-    List<TalonarioDetalleDto> listar(TipoTalonario tipo, boolean soloMios);
+    List<TalonarioDetalleDto> listar(DestinoTalonario destino, TipoTalonario tipo, boolean soloMios);
+
+    /**
+     * Deja los talonarios de una vendedora exactamente como dice la lista (pueden
+     * ser de varios destinos y eventos a la vez).
+     */
+    ResultadoAsignacionDto asignar(AsignacionTalonariosDto dto);
 
     TalonarioDetalleDto obtener(Long idTalonario);
 

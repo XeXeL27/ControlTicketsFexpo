@@ -40,6 +40,8 @@ export interface BoletoDetalleDto {
 export interface FilaPreviaBoleto {
   fila: number
   codigo?: string
+  /** Día en que vale el boleto (DIA_1/2/3). Vacío = falta en el archivo. */
+  diaFeria?: string
   /** "NUEVO", "YA_EXISTE" o el motivo por el que fallaria. */
   estado: string
 }
@@ -76,6 +78,10 @@ export interface ValidacionBoletoDto {
   categoria: CategoriaBoleto
   nombrePersona?: string
   diaFeria?: DiaFeria
+  /** Id del movimiento recién creado. */
+  idMovimiento?: number
+  /** Datos que dejó esta persona la última vez que salió diciendo que volvía. */
+  registroPrevio?: RegistroSalidaDetalleDto
 }
 
 export interface BoletoDentroDto {
@@ -109,4 +115,31 @@ export interface EventoBoletoDto {
   categoria?: CategoriaBoleto
   nombrePersona?: string
   diaFeria?: DiaFeria
+}
+
+// --- Registro de salida (visitante que dice que va a volver) ---
+
+/** Datos que dejó el visitante la última vez que salió. Los tres son opcionales. */
+export interface RegistroSalidaDetalleDto {
+  idRegistro: number
+  nombre?: string
+  ci?: string
+  /**
+   * true = hay foto guardada. La imagen NO viene en el JSON: se guarda en una
+   * carpeta del servidor y se pide aparte con `fotoDeRegistro(idRegistro)`.
+   */
+  tieneFoto: boolean
+  /** true = se le preguntó y no quiso dar sus datos. */
+  sinDatos: boolean
+  fecha?: string
+  registradoPor?: string
+}
+
+/** Lo que manda la puerta al registrar. */
+export interface RegistroSalidaDto {
+  idBoleto: number
+  nombre?: string
+  ci?: string
+  foto?: string
+  sinDatos?: boolean
 }

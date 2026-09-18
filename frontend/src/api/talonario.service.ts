@@ -1,9 +1,12 @@
 // Capa de API del control de venta por talonario.
 import http from '@/api/http'
 import type {
+  AsignacionTalonariosDto,
   BoletoTalonarioDto,
+  DestinoTalonario,
   GeneracionTalonariosDto,
   MarcarVentaDto,
+  ResultadoAsignacionDto,
   ResultadoMarcadoDto,
   TalonarioActualizarDto,
   TalonarioDetalleDto,
@@ -11,10 +14,17 @@ import type {
   TipoTalonario,
 } from '@/types/talonario.type'
 
-/** soloMios=true: solo los talonarios asignados al usuario logueado (vista de la vendedora). */
-export function listarTalonarios(tipo?: TipoTalonario, soloMios = false) {
+/**
+ * soloMios=true: solo los talonarios asignados al usuario logueado (vista de la vendedora).
+ * `destino` y `tipo` son filtros opcionales y se combinan.
+ */
+export function listarTalonarios(
+  destino?: DestinoTalonario,
+  tipo?: TipoTalonario,
+  soloMios = false,
+) {
   return http
-    .get<TalonarioDetalleDto[]>('/talonarios/listar', { params: { tipo, soloMios } })
+    .get<TalonarioDetalleDto[]>('/talonarios/listar', { params: { destino, tipo, soloMios } })
     .then((r) => r.data)
 }
 
@@ -50,4 +60,13 @@ export function boletosDeTalonario(idTalonario: number) {
 
 export function marcarVenta(dto: MarcarVentaDto) {
   return http.patch<ResultadoMarcadoDto>('/talonarios/marcar', dto).then((r) => r.data)
+}
+
+/**
+ * Deja los talonarios de una vendedora exactamente como dice la lista.
+ * Reasignar no pierde las ventas ya hechas: quién vendió cada boleto queda
+ * guardado en el boleto, no en el talonario.
+ */
+export function asignarTalonarios(dto: AsignacionTalonariosDto) {
+  return http.patch<ResultadoAsignacionDto>('/talonarios/asignar', dto).then((r) => r.data)
 }

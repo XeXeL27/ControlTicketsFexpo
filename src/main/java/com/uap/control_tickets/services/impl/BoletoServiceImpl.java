@@ -177,9 +177,15 @@ public class BoletoServiceImpl implements BoletoService {
                 PrevisualizacionBoletoCsvDto.FilaPrevia fp = new PrevisualizacionBoletoCsvDto.FilaPrevia();
                 fp.setFila(fila);
                 fp.setCodigo(dto.getCodigo());
+                if (dto.getDiaFeria() != null) fp.setDiaFeria(dto.getDiaFeria().name());
 
                 if (dto.getCodigo() == null) {
                     fp.setEstado("Falta el código");
+                    p.setConProblemas(p.getConProblemas() + 1);
+                } else if (dto.getDiaFeria() == null) {
+                    // Sin día el boleto no se puede validar en la puerta: se avisa
+                    // ANTES de importar, no después.
+                    fp.setEstado("Falta el día (1, 2 o 3)");
                     p.setConProblemas(p.getConProblemas() + 1);
                 } else if (boletoDao.findByCodigo(dto.getCodigo()).isPresent()) {
                     fp.setEstado("YA_EXISTE");
@@ -369,12 +375,24 @@ public class BoletoServiceImpl implements BoletoService {
             if (!actualizar) {
                 throw new NegocioException("Ya existe un boleto con el código '" + codigo + "'");
             }
-            return previo; // ya existe y está activo: no se toca (preserva dentro/fuera)
+            // Reimportar CORRIGE el día (así se arregla un archivo mal cargado),
+            // pero NO toca 'dentro': si la persona está adentro, sigue adentro.
+            if (dto.getDiaFeria() != null && dto.getDiaFeria() != previo.getDiaFeria()) {
+                previo.setDiaFeria(dto.getDiaFeria());
+                boletoDao.save(previo);
+            }
+            return previo;
         }
 
         Boleto b = previo != null ? previo : new Boleto();
         b.setEstado(EstadoRegistro.ACTIVO);
         b.setCodigo(codigo);
+        // El día es obligatorio para los sueltos: un boleto sin día no se puede
+        // validar en la puerta y entraría cualquier día del evento.
+        if (dto.getDiaFeria() == null) {
+            throw new NegocioException("Falta el día del boleto '" + codigo + "' (1, 2 o 3)");
+        }
+        b.setDiaFeria(dto.getDiaFeria());
         if (previo == null) b.setDentro(false); // alta nueva: arranca afuera
         return boletoDao.save(b);
     }
@@ -390,11 +408,26 @@ public class BoletoServiceImpl implements BoletoService {
     }
 
     /** Posicional: [0]=codigo (única columna esperada). */
+    /** CSV de boletos sueltos: `codigo, dia`. El día acepta 1/2/3 o DIA_1/DIA_2/DIA_3. */
     private BoletoDto filaADto(String linea, char sep) {
         String[] c = CsvUtils.separar(linea, sep);
         BoletoDto dto = new BoletoDto();
         dto.setCodigo(CsvUtils.get(c, 0));
+        dto.setDiaFeria(parsearDia(CsvUtils.get(c, 1)));
         return dto;
+    }
+
+    /**
+     * Interpreta la columna del día con tolerancia: en los archivos reales viene
+     * como "1", "dia 1", "DIA_1" o "día 1". Devuelve null si está vacía.
+     */
+    private DiaFeria parsearDia(String valor) {
+        if (valor == null || valor.isBlank()) return null;
+        String n = CsvUtils.normalizar(valor); // minúsculas, sin tildes ni signos
+        if (n.endsWith("1") ) return DiaFeria.DIA_1;
+        if (n.endsWith("2")) return DiaFeria.DIA_2;
+        if (n.endsWith("3")) return DiaFeria.DIA_3;
+        throw new NegocioException("Día no reconocido: '" + valor + "'. Use 1, 2 o 3.");
     }
 
     // -------------------------------------------------------------------------

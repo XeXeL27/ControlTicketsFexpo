@@ -5,11 +5,15 @@
 // ve el avance de ventas. El marcado de vendidos lo hace cada vendedora en su
 // propia pantalla (/mis-talonarios).
 //
-// Nota de negocio: cada tipo (evento 1/2/3 y combo) lleva su PROPIA numeración y
-// todos pueden arrancar en 1. Lo que no puede pasar es que dos talonarios del
-// MISMO tipo se pisen; eso lo rechaza el backend.
+// Nota de negocio: la numeración la parte el par (destino, evento). Concierto,
+// feria y parqueo tienen cada uno su serie, y dentro de cada destino cada evento
+// también, así que todos pueden arrancar en 1. Lo único que no puede pasar es que
+// dos talonarios del MISMO destino y MISMO evento se pisen; eso lo rechaza el
+// backend con un mensaje que nombra el ámbito ("Feria · Evento 1").
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
+import SelectBase from '@/components/SelectBase.vue'
+import type { OpcionSelect } from '@/components/SelectBase.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import Alerta from '@/components/Alerta.vue'
 import { mensajeError } from '@/utils/errores'
@@ -17,6 +21,7 @@ import { useAlertas } from '@/composables/useAlertas'
 import { useConfirmacion } from '@/composables/useConfirmacion'
 import {
   actualizarTalonario,
+  asignarTalonarios,
   crearTalonario,
   eliminarTalonario,
   generarTalonarios,
@@ -27,6 +32,7 @@ import type {
   GeneracionTalonariosDto,
   TalonarioDetalleDto,
   TalonarioDto,
+  DestinoTalonario,
   TipoTalonario,
 } from '@/types/talonario.type'
 import type { UsuarioDetalleDto } from '@/types/usuario.type'
@@ -41,6 +47,12 @@ const cargando = ref(false)
 const guardando = ref(false)
 const error = ref('')
 
+const DESTINOS: { valor: DestinoTalonario; nombre: string }[] = [
+  { valor: 'CONCIERTO', nombre: 'Concierto' },
+  { valor: 'FERIA', nombre: 'Feria' },
+  { valor: 'PARQUEO', nombre: 'Parqueo' },
+]
+
 const TIPOS: { valor: TipoTalonario; nombre: string }[] = [
   { valor: 'EVENTO_1', nombre: 'Evento 1' },
   { valor: 'EVENTO_2', nombre: 'Evento 2' },
@@ -48,11 +60,32 @@ const TIPOS: { valor: TipoTalonario; nombre: string }[] = [
   { valor: 'COMBO', nombre: 'Combo (3 días)' },
 ]
 
+const destinoFiltro = ref<DestinoTalonario | ''>('')
 const tipoFiltro = ref<TipoTalonario | ''>('')
+
+// SelectBase pide {valor, etiqueta}; las constantes de arriba usan `nombre`.
+const OPC_DESTINO: OpcionSelect<DestinoTalonario>[] = DESTINOS.map((d) => ({
+  valor: d.valor,
+  etiqueta: d.nombre,
+}))
+const OPC_TIPO: OpcionSelect<TipoTalonario>[] = TIPOS.map((t) => ({
+  valor: t.valor,
+  etiqueta: t.nombre,
+}))
+
+/** Vendedoras para los desplegables: el username manda y el nombre va de detalle. */
+const OPC_USUARIOS = computed<OpcionSelect<number>[]>(() =>
+  usuarios.value.map((u) => ({
+    valor: u.idUsuario,
+    etiqueta: u.username,
+    detalle: u.nombreCompleto,
+  })),
+)
 
 // --- Modales ---
 const modalAlta = ref(false)
 const modalGenerar = ref(false)
+const modalAsignar = ref(false)
 const editando = ref<TalonarioDetalleDto | null>(null)
 const errorForm = ref('')
 
@@ -62,6 +95,7 @@ const formGen = ref<GeneracionTalonariosDto>(genVacio())
 function formVacio(): TalonarioDto {
   return {
     nombre: '',
+    destino: 'FERIA',
     tipo: 'EVENTO_1',
     numeroDesde: null,
     numeroHasta: null,
@@ -71,6 +105,7 @@ function formVacio(): TalonarioDto {
 }
 function genVacio(): GeneracionTalonariosDto {
   return {
+    destino: 'FERIA',
     tipo: 'EVENTO_1',
     cantidadTalonarios: null,
     boletosPorTalonario: null,
@@ -80,8 +115,112 @@ function genVacio(): GeneracionTalonariosDto {
   }
 }
 
+// --- Asignación en bloque -------------------------------------------------
+// Una vendedora puede llevar VARIOS talonarios y de cualquier combinación de
+// destino y evento (parqueo + concierto + feria a la vez). El modelo siempre lo
+// permitió; lo que faltaba era poder hacerlo sin editar talonario por talonario.
+//
+// El modal trabaja con "el estado final": se marcan con casillas todos los que
+// quedan a cargo de esa persona. Desmarcar uno se lo quita. Por eso al elegir la
+// vendedora se pre-marcan los que ya tiene.
+const vendedoraSel = ref<number | ''>('')
+const seleccionados = ref<Set<number>>(new Set())
+const destinoAsignar = ref<DestinoTalonario | ''>('')
+const filtroAsignar = ref('')
+
+/** Talonarios que se ofrecen en el modal, con el filtro de destino y el buscador. */
+const talonariosAsignables = computed(() => {
+  const q = filtroAsignar.value.trim().toLowerCase()
+  return talonarios.value
+    .filter((t) => !destinoAsignar.value || t.destino === destinoAsignar.value)
+    .filter(
+      (t) =>
+        !q ||
+        `${t.nombre} ${t.destinoEtiqueta} ${t.tipoEtiqueta} ${t.numeroDesde}-${t.numeroHasta}`
+          .toLowerCase()
+          .includes(q),
+    )
+})
+
+/** Cuántos de los que se ven ya están marcados (para el "marcar todos"). */
+const todosVisiblesMarcados = computed(
+  () =>
+    talonariosAsignables.value.length > 0 &&
+    talonariosAsignables.value.every((t) => seleccionados.value.has(t.idTalonario)),
+)
+
+function abrirAsignar() {
+  vendedoraSel.value = ''
+  seleccionados.value = new Set()
+  destinoAsignar.value = ''
+  filtroAsignar.value = ''
+  errorForm.value = ''
+  modalAsignar.value = true
+}
+
+/** Al elegir vendedora se pre-marcan los talonarios que YA tiene. */
+function onVendedora(id: number | '') {
+  vendedoraSel.value = id
+  seleccionados.value = new Set(
+    id === '' ? [] : talonarios.value.filter((t) => t.idUsuarioAsignado === id).map((t) => t.idTalonario),
+  )
+}
+
+function alternarTalonario(id: number) {
+  // Se reasigna el Set entero: mutarlo no dispara la reactividad de Vue.
+  const copia = new Set(seleccionados.value)
+  copia.has(id) ? copia.delete(id) : copia.add(id)
+  seleccionados.value = copia
+}
+
+/** Marca o desmarca de una vez los que se están viendo (respeta el filtro). */
+function alternarVisibles() {
+  const copia = new Set(seleccionados.value)
+  const marcar = !todosVisiblesMarcados.value
+  for (const t of talonariosAsignables.value) {
+    if (marcar) copia.add(t.idTalonario)
+    else copia.delete(t.idTalonario)
+  }
+  seleccionados.value = copia
+}
+
+/** Resumen "2 de parqueo, 1 de feria" para que se vea qué se está armando. */
+const resumenSeleccion = computed(() => {
+  const porDestino = new Map<string, number>()
+  for (const t of talonarios.value) {
+    if (!seleccionados.value.has(t.idTalonario)) continue
+    porDestino.set(t.destinoEtiqueta, (porDestino.get(t.destinoEtiqueta) ?? 0) + 1)
+  }
+  return [...porDestino.entries()].map(([d, n]) => `${n} de ${d.toLowerCase()}`).join(' · ')
+})
+
+async function guardarAsignacion() {
+  if (vendedoraSel.value === '') {
+    errorForm.value = 'Elija la vendedora'
+    return
+  }
+  errorForm.value = ''
+  guardando.value = true
+  try {
+    const r = await asignarTalonarios({
+      idUsuario: vendedoraSel.value,
+      idTalonarios: [...seleccionados.value],
+    })
+    modalAsignar.value = false
+    alertas.exito(
+      `${r.vendedora}: ${r.total} talonario(s) a su cargo (+${r.asignados} / -${r.quitados}).`,
+    )
+    await cargar()
+  } catch (e) {
+    errorForm.value = mensajeError(e, 'No se pudieron asignar los talonarios')
+  } finally {
+    guardando.value = false
+  }
+}
+
 const columnas: ColumnaTabla[] = [
   { clave: 'nombre', titulo: 'Talonario' },
+  { clave: 'destinoEtiqueta', titulo: 'Destino', ancho: '110px' },
   { clave: 'tipoEtiqueta', titulo: 'Evento', ancho: '130px' },
   { clave: 'rango', titulo: 'Rango', ancho: '130px' },
   { clave: 'usuarioAsignado', titulo: 'Vendedora', ancho: '150px' },
@@ -91,6 +230,7 @@ const columnas: ColumnaTabla[] = [
 /** Filas con el rango ya armado, para que el buscador lo encuentre como texto. */
 const filas = computed(() =>
   talonarios.value
+    .filter((t) => !destinoFiltro.value || t.destino === destinoFiltro.value)
     .filter((t) => !tipoFiltro.value || t.tipo === tipoFiltro.value)
     .map((t) => ({ ...t, rango: `${t.numeroDesde}-${t.numeroHasta}` })),
 )
@@ -138,6 +278,7 @@ function editar(t: TalonarioDetalleDto) {
   editando.value = t
   form.value = {
     nombre: t.nombre,
+    destino: t.destino,
     tipo: t.tipo,
     numeroDesde: t.numeroDesde,
     numeroHasta: t.numeroHasta,
@@ -153,7 +294,7 @@ async function guardar() {
   guardando.value = true
   try {
     if (editando.value) {
-      // El tipo y el rango no se editan: ya generaron sus boletos.
+      // El destino, el tipo y el rango no se editan: ya generaron sus boletos.
       await actualizarTalonario(editando.value.idTalonario, {
         nombre: form.value.nombre,
         precioUnitario: form.value.precioUnitario,
@@ -230,6 +371,7 @@ onMounted(cargar)
     <div class="cabecera">
       <h2>Talonarios</h2>
       <div class="acciones-cabecera">
+        <button class="secundario" @click="abrirAsignar">Asignar a vendedora</button>
         <button class="secundario" @click="abrirGenerar">Generar varios</button>
         <button @click="nuevo">+ Nuevo talonario</button>
       </div>
@@ -269,14 +411,26 @@ onMounted(cargar)
       clave="idTalonario"
       :cargando="cargando"
       :por-pagina="15"
-      placeholder-busqueda="Buscar por nombre, evento, rango o vendedora..."
+      placeholder-busqueda="Buscar por nombre, destino, evento, rango o vendedora..."
       texto-vacio="Todavía no hay talonarios cargados."
     >
       <template #herramientas>
-        <select v-model="tipoFiltro" aria-label="Filtrar por evento">
-          <option value="">Todos los eventos ({{ talonarios.length }})</option>
-          <option v-for="t in TIPOS" :key="t.valor" :value="t.valor">{{ t.nombre }}</option>
-        </select>
+        <SelectBase
+          v-model="destinoFiltro"
+          :opciones="OPC_DESTINO"
+          limpiable
+          placeholder="Todos los destinos"
+          aria-label="Filtrar por destino"
+          class="filtro"
+        />
+        <SelectBase
+          v-model="tipoFiltro"
+          :opciones="OPC_TIPO"
+          limpiable
+          :placeholder="`Todos los eventos (${talonarios.length})`"
+          aria-label="Filtrar por evento"
+          class="filtro"
+        />
       </template>
 
       <template #col-usuarioAsignado="{ valor }">
@@ -312,10 +466,21 @@ onMounted(cargar)
         <label for="t-nombre">Nombre *</label>
         <input id="t-nombre" v-model="form.nombre" required placeholder="Ej. Talonario A" />
 
+        <label for="t-destino">Destino *</label>
+        <SelectBase
+          id="t-destino"
+          v-model="form.destino"
+          :opciones="OPC_DESTINO"
+          :deshabilitado="!!editando"
+        />
+
         <label for="t-tipo">Evento *</label>
-        <select id="t-tipo" v-model="form.tipo" :disabled="!!editando" required>
-          <option v-for="t in TIPOS" :key="t.valor" :value="t.valor">{{ t.nombre }}</option>
-        </select>
+        <SelectBase
+          id="t-tipo"
+          v-model="form.tipo"
+          :opciones="OPC_TIPO"
+          :deshabilitado="!!editando"
+        />
 
         <div class="dos-columnas">
           <div>
@@ -341,12 +506,14 @@ onMounted(cargar)
         <input id="t-precio" v-model.number="form.precioUnitario" type="number" min="0" step="0.01" />
 
         <label for="t-vend">Vendedora asignada (opcional)</label>
-        <select id="t-vend" v-model="form.idUsuarioAsignado">
-          <option :value="null">Sin asignar</option>
-          <option v-for="u in usuarios" :key="u.idUsuario" :value="u.idUsuario">
-            {{ u.username }} — {{ u.nombreCompleto }}
-          </option>
-        </select>
+        <SelectBase
+          id="t-vend"
+          :model-value="form.idUsuarioAsignado ?? ''"
+          :opciones="OPC_USUARIOS"
+          limpiable
+          placeholder="Sin asignar"
+          @update:model-value="form.idUsuarioAsignado = $event === '' ? null : Number($event)"
+        />
 
         <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
       </form>
@@ -366,10 +533,11 @@ onMounted(cargar)
           Ej: 20 talonarios de 200 desde el 1 → 1-200, 201-400, 401-600…
         </p>
 
+        <label for="g-destino">Destino *</label>
+        <SelectBase id="g-destino" v-model="formGen.destino" :opciones="OPC_DESTINO" />
+
         <label for="g-tipo">Evento *</label>
-        <select id="g-tipo" v-model="formGen.tipo" required>
-          <option v-for="t in TIPOS" :key="t.valor" :value="t.valor">{{ t.nombre }}</option>
-        </select>
+        <SelectBase id="g-tipo" v-model="formGen.tipo" :opciones="OPC_TIPO" />
 
         <div class="dos-columnas">
           <div>
@@ -401,6 +569,92 @@ onMounted(cargar)
         <button type="button" class="secundario" @click="modalGenerar = false">Cancelar</button>
         <button type="submit" form="form-generar" :disabled="guardando || !previoGeneracion">
           {{ guardando ? 'Generando...' : 'Generar' }}
+        </button>
+      </template>
+    </ModalBase>
+
+    <!-- Asignación en bloque: una vendedora, muchos talonarios, de cualquier
+         destino y evento. Las casillas marcadas son el estado FINAL. -->
+    <ModalBase
+      v-if="modalAsignar"
+      titulo="Asignar talonarios a una vendedora"
+      ancho="620px"
+      @cerrar="modalAsignar = false"
+    >
+      <div class="asignar">
+        <label for="a-vend">Vendedora *</label>
+        <SelectBase
+          id="a-vend"
+          :model-value="vendedoraSel"
+          :opciones="OPC_USUARIOS"
+          placeholder="Elija la vendedora…"
+          @update:model-value="onVendedora($event === '' ? '' : Number($event))"
+        />
+
+        <template v-if="vendedoraSel !== ''">
+          <p class="ayuda">
+            Marque <strong>todos</strong> los talonarios que quedan a su cargo. Puede
+            combinar destinos: parqueo, concierto y feria a la vez. Desmarcar uno se
+            lo quita.
+          </p>
+
+          <div class="asignar-filtros">
+            <SelectBase
+              v-model="destinoAsignar"
+              :opciones="OPC_DESTINO"
+              limpiable
+              placeholder="Todos los destinos"
+              aria-label="Filtrar por destino"
+            />
+            <input v-model="filtroAsignar" type="search" placeholder="Buscar talonario…" />
+          </div>
+
+          <div class="asignar-barra">
+            <button type="button" class="enlace" @click="alternarVisibles">
+              {{ todosVisiblesMarcados ? 'Desmarcar los que se ven' : 'Marcar los que se ven' }}
+            </button>
+            <span class="conteo">{{ seleccionados.size }} marcado(s)</span>
+          </div>
+
+          <ul class="asignar-lista">
+            <li v-for="t in talonariosAsignables" :key="t.idTalonario">
+              <label class="fila-talonario" :class="{ marcado: seleccionados.has(t.idTalonario) }">
+                <input
+                  type="checkbox"
+                  :checked="seleccionados.has(t.idTalonario)"
+                  @change="alternarTalonario(t.idTalonario)"
+                />
+                <span class="ft-datos">
+                  <span class="ft-nombre">{{ t.nombre }}</span>
+                  <span class="ft-meta">
+                    {{ t.destinoEtiqueta }} · {{ t.tipoEtiqueta }} ·
+                    {{ t.numeroDesde }}-{{ t.numeroHasta }}
+                  </span>
+                </span>
+                <!-- Aviso de que se le saca a otra persona: es un cambio que afecta
+                     a un tercero y no debería pasar desapercibido. -->
+                <span
+                  v-if="t.idUsuarioAsignado && t.idUsuarioAsignado !== vendedoraSel"
+                  class="ft-duenio"
+                >
+                  hoy: {{ t.usuarioAsignado }}
+                </span>
+              </label>
+            </li>
+            <li v-if="!talonariosAsignables.length" class="vacio">
+              No hay talonarios que coincidan con el filtro.
+            </li>
+          </ul>
+
+          <p v-if="resumenSeleccion" class="resumen-sel">{{ resumenSeleccion }}</p>
+        </template>
+
+        <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
+      </div>
+      <template #pie>
+        <button type="button" class="secundario" @click="modalAsignar = false">Cancelar</button>
+        <button type="button" :disabled="guardando || vendedoraSel === ''" @click="guardarAsignacion">
+          {{ guardando ? 'Guardando...' : 'Guardar asignación' }}
         </button>
       </template>
     </ModalBase>
@@ -451,4 +705,108 @@ onMounted(cargar)
 @media (max-width: 420px) {
   .dos-columnas { grid-template-columns: 1fr; }
 }
+.asignar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Sin min-width: el ancho lo pone el modal (prop `ancho`), que ya se achica
+     solo en el celular por su max-width de 92vw. Un min-width acá desbordaba
+     la caja y cortaba los textos. */
+}
+.asignar .ayuda {
+  color: var(--texto-suave);
+  font-size: 13px;
+  margin: 0;
+}
+.asignar-filtros {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.asignar-filtros > * {
+  flex: 1 1 180px;
+}
+.asignar-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.asignar-barra .enlace {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--azul);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: auto;
+}
+.asignar-barra .conteo {
+  color: var(--texto-suave);
+  font-size: 13px;
+}
+.asignar-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+}
+.asignar-lista .vacio {
+  padding: 16px;
+  color: var(--texto-suave);
+  font-size: 14px;
+  text-align: center;
+}
+.fila-talonario {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px; /* comodo para el dedo */
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borde);
+  cursor: pointer;
+}
+.asignar-lista li:last-child .fila-talonario {
+  border-bottom: none;
+}
+.fila-talonario.marcado {
+  background: #eef5fb;
+}
+.fila-talonario input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.ft-datos {
+  flex: 1;
+  min-width: 0;
+}
+.ft-nombre {
+  display: block;
+  font-size: 14px;
+}
+.ft-meta {
+  display: block;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+.ft-duenio {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #a05a00;
+  background: #fff3e0;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.resumen-sel {
+  margin: 0;
+  font-size: 13px;
+  color: var(--azul);
+  font-weight: 600;
+}
+
 </style>

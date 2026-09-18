@@ -17,13 +17,14 @@
 //   SALIDA estando fuera   -> 409 "no hay entrada" (duplicado).
 //   codigo inexistente     -> 404.
 // Al terminar cualquier validacion emite `validado` para refrescar la lista.
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import axios from 'axios'
 import Alerta from '@/components/Alerta.vue'
 import ModalBase from '@/components/ModalBase.vue'
 import { useAlertas } from '@/composables/useAlertas'
 import { mensajeError } from '@/utils/errores'
-import { validarBoleto } from '@/api/control-boleto.service'
+import { fotoDeRegistro, registrarSalida, validarBoleto } from '@/api/control-boleto.service'
+import { comprimirFoto, pesoKb } from '@/utils/foto'
 import type { TipoMovimiento } from '@/types/control.type'
 import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
 import type { ValidacionBoletoDto } from '@/types/boleto.type'
@@ -41,6 +42,117 @@ const alertas = useAlertas()
 
 const procesando = ref(false)
 const resultado = ref<ValidacionBoletoDto | null>(null)
+
+// --- "¿Va a volver a ingresar?" (solo en SALIDA, solo boletos sueltos) ---
+// Los boletos de administrativo/docente ya tienen persona: no se les pregunta.
+const mostrarFormulario = ref(false)
+const guardandoRegistro = ref(false)
+const reg = ref({ nombre: '', ci: '', foto: '' })
+
+/** ¿A este boleto corresponde preguntarle si vuelve? */
+const puedePreguntar = computed(() =>
+  props.tipo === 'SALIDA'
+    && !!resultado.value
+    && !resultado.value.bloqueado
+    && resultado.value.categoria === 'PARTICULAR',
+)
+
+/**
+ * Foto del registro previo. No viene en el JSON: se guarda en una carpeta del
+ * servidor y se pide aparte, como blob, porque el endpoint exige el token.
+ * El objectURL se libera al reemplazarlo y al desmontar; si no, cada escaneo
+ * deja una imagen retenida en memoria (un puesto escanea cientos por noche).
+ */
+const fotoPrevia = ref<string | null>(null)
+
+function soltarFotoPrevia() {
+  if (fotoPrevia.value) URL.revokeObjectURL(fotoPrevia.value)
+  fotoPrevia.value = null
+}
+
+watch(
+  () => resultado.value?.registroPrevio ?? null,
+  async (previo) => {
+    soltarFotoPrevia()
+    if (!previo?.tieneFoto) return
+    const url = await fotoDeRegistro(previo.idRegistro)
+    // Puede haber llegado otro escaneo mientras bajaba: si ya cambió, se descarta.
+    if (resultado.value?.registroPrevio?.idRegistro !== previo.idRegistro) {
+      if (url) URL.revokeObjectURL(url)
+      return
+    }
+    fotoPrevia.value = url
+  },
+)
+
+onUnmounted(soltarFotoPrevia)
+
+/**
+ * El <input type="file"> va OCULTO y se dispara desde un boton propio: el input
+ * nativo se ve como "subir archivo" y aca lo que se quiere es sacar una foto.
+ */
+const inputFoto = ref<HTMLInputElement | null>(null)
+const procesandoFoto = ref(false)
+
+function abrirCamara() {
+  inputFoto.value?.click()
+}
+
+/** Toma la foto del celular y la comprime ANTES de mandarla. */
+async function onFoto(e: Event) {
+  const input = e.target as HTMLInputElement
+  const archivo = input.files?.[0]
+  // Se limpia el input SIEMPRE: si no, volver a elegir la misma foto no dispara
+  // 'change' y el boton "Repetir" parece que no hace nada.
+  const limpiar = () => { input.value = '' }
+  if (!archivo) { limpiar(); return }
+  procesandoFoto.value = true
+  try {
+    const comprimida = await comprimirFoto(archivo)
+    if (!comprimida) {
+      alertas.error('No se pudo leer la foto. Intente de nuevo.')
+      return
+    }
+    reg.value.foto = comprimida
+  } finally {
+    procesandoFoto.value = false
+    limpiar()
+  }
+}
+
+/**
+ * Guarda el registro. `sinDatos` = el visitante no quiso dar nada.
+ * Si esto falla NO pasa nada grave: la salida ya quedó registrada antes.
+ */
+async function guardarRegistro(sinDatos: boolean) {
+  const idBoleto = resultado.value?.idBoleto
+  if (!idBoleto) return
+  guardandoRegistro.value = true
+  try {
+    await registrarSalida({
+      idBoleto,
+      nombre: sinDatos ? undefined : reg.value.nombre || undefined,
+      ci: sinDatos ? undefined : reg.value.ci || undefined,
+      foto: sinDatos ? undefined : reg.value.foto || undefined,
+      sinDatos,
+    })
+    alertas.exito(sinDatos ? 'Registrado: no quiso dar sus datos.' : 'Datos registrados.')
+    // Se limpia todo el panel, no solo el formulario: si solo se cerrara el
+    // formulario volvería a aparecer "¿Va a volver a ingresar?" para alguien que
+    // ya se registró, y el operador no sabría si le quedó guardado.
+    // Limpio queda listo para el siguiente código.
+    limpiar()
+  } catch (e) {
+    alertas.error(mensajeError(e, 'No se pudieron guardar los datos'))
+  } finally {
+    guardandoRegistro.value = false
+  }
+}
+
+function cerrarFormulario() {
+  mostrarFormulario.value = false
+  reg.value = { nombre: '', ci: '', foto: '' }
+}
 const errorValidacion = ref('')
 const manual = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -114,6 +226,7 @@ function formatearHora(iso?: string): string {
 
 /** Limpia el resultado de este panel (lo usa el padre si hace falta reiniciar). */
 function limpiar(): void {
+  cerrarFormulario()
   resultado.value = null
   errorValidacion.value = ''
   manual.value = ''
@@ -188,6 +301,97 @@ defineExpose({ limpiar })
       </p>
 
       <p v-if="resultado.mensaje" class="motivo">{{ resultado.mensaje }}</p>
+
+      <!-- REINGRESO: lo que dejó la última vez que salió, para comparar -->
+      <div v-if="resultado.registroPrevio" class="previo">
+        <div class="previo-cab">Dejó sus datos al salir</div>
+        <div v-if="resultado.registroPrevio.sinDatos" class="previo-sin">
+          No quiso dar sus datos.
+        </div>
+        <div v-else class="previo-cuerpo">
+          <img v-if="fotoPrevia" :src="fotoPrevia" alt="Foto del visitante" />
+          <div>
+            <div v-if="resultado.registroPrevio.nombre"><b>{{ resultado.registroPrevio.nombre }}</b></div>
+            <div v-if="resultado.registroPrevio.ci">CI: {{ resultado.registroPrevio.ci }}</div>
+            <div class="previo-hora">Salida: {{ formatearHora(resultado.registroPrevio.fecha) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SALIDA: ¿va a volver? Solo boletos sueltos (los demás ya tienen persona) -->
+      <div v-if="puedePreguntar" class="volver">
+        <template v-if="!mostrarFormulario">
+          <p class="volver-pregunta">¿Va a volver a ingresar?</p>
+          <div class="volver-botones">
+            <button type="button" class="btn-si" @click="mostrarFormulario = true">Sí, registrar</button>
+            <button type="button" class="btn-no" @click="limpiar()">No</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p class="volver-ayuda">
+            Todo es opcional. Si no quiere dar sus datos, use el botón de abajo.
+          </p>
+          <label class="campo">
+            <span>Nombre</span>
+            <input v-model="reg.nombre" type="text" placeholder="Opcional" />
+          </label>
+          <label class="campo">
+            <span>CI</span>
+            <input v-model="reg.ci" type="text" inputmode="numeric" placeholder="Opcional" />
+          </label>
+
+          <div class="campo">
+            <span>Fotografía</span>
+            <!-- El input va oculto: `capture` abre la cámara trasera del celular
+                 directamente y la foto se comprime en el navegador antes de subirla. -->
+            <input
+              ref="inputFoto"
+              class="input-oculto"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              @change="onFoto"
+            />
+
+            <button
+              v-if="!reg.foto"
+              type="button"
+              class="btn-camara"
+              :disabled="procesandoFoto"
+              @click="abrirCamara"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 3l-1.5 2H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.5L15 3H9z" />
+                <circle cx="12" cy="12.5" r="3.6" />
+              </svg>
+              <span>{{ procesandoFoto ? 'Procesando…' : 'Sacar foto' }}</span>
+            </button>
+
+            <div v-else class="foto-previa">
+              <img :src="reg.foto" alt="Foto tomada" />
+              <div class="foto-datos">
+                <div class="foto-ok">Foto lista · {{ pesoKb(reg.foto) }} KB</div>
+                <div class="foto-acciones">
+                  <button type="button" :disabled="procesandoFoto" @click="abrirCamara">
+                    {{ procesandoFoto ? 'Procesando…' : 'Repetir' }}
+                  </button>
+                  <button type="button" class="quitar" @click="reg.foto = ''">Quitar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="volver-botones">
+            <button type="button" class="btn-si" :disabled="guardandoRegistro" @click="guardarRegistro(false)">
+              {{ guardandoRegistro ? 'Guardando…' : 'Guardar datos' }}
+            </button>
+            <button type="button" class="btn-no" :disabled="guardandoRegistro" @click="guardarRegistro(true)">
+              No quiso dar sus datos
+            </button>
+          </div>
+        </template>
+      </div>
 
       <ul class="datos">
         <li>
@@ -374,4 +578,57 @@ defineExpose({ limpiar })
   .resultado { flex-direction: column; align-items: flex-start; gap: 4px; }
   .resultado-codigo { margin-left: 0; }
 }
+
+/* --- ¿Va a volver? y registro de datos ------------------------------- */
+/* Botones y campos grandes: esto se usa con el dedo, en un celular, parado. */
+.volver { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--borde); }
+.volver-pregunta { font-weight: 600; margin: 0 0 8px; }
+.volver-ayuda { color: var(--texto-suave); font-size: 13px; margin: 0 0 10px; }
+.volver-botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.volver-botones button { flex: 1 1 140px; min-height: 48px; font-size: 15px; }
+.btn-si { background: var(--azul); color: #fff; }
+.btn-no { background: #eef2f7; color: var(--texto); }
+.campo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.campo > span { font-size: 12px; font-weight: 600; color: var(--texto-suave); }
+.campo input[type="text"] { min-height: 48px; font-size: 16px; }
+.campo input[type="file"] { min-height: 48px; padding: 10px; }
+/* El input nativo se esconde sin display:none para que siga siendo clickeable
+   por codigo y accesible por teclado. */
+/* Especificidad `.campo input.input-oculto`: la regla generica `.campo input`
+   le gana a una sola clase y el input volvia a ocupar su caja. */
+.campo input.input-oculto {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; border: 0; opacity: 0;
+  min-height: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none;
+}
+.btn-camara {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 56px; margin-top: 6px;
+  background: var(--azul); color: #fff;
+  border: none; border-radius: 10px;
+  font-size: 16px; font-weight: 600; cursor: pointer;
+}
+.btn-camara:disabled { opacity: .6; cursor: default; }
+.btn-camara svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+/* Misma ficha que el banner de datos previos, para que se lea igual. */
+.foto-previa {
+  display: flex; align-items: center; gap: 12px; margin-top: 8px;
+  padding: 10px 12px; background: #eef5fb;
+  border: 1px solid #cfe2f5; border-radius: 10px;
+}
+.foto-previa img { width: 76px; height: 76px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borde); }
+.foto-datos { flex: 1; min-width: 0; }
+.foto-ok { font-size: 13px; font-weight: 600; color: var(--azul); margin-bottom: 8px; }
+.foto-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.foto-acciones button { min-height: 40px; padding: 0 14px; font-size: 14px; }
+.quitar { background: #eef2f7; color: var(--texto); min-height: 36px; padding: 6px 12px; font-size: 13px; }
+
+/* Datos previos al reingresar */
+.previo { margin-top: 10px; padding: 10px 12px; background: #eef5fb; border: 1px solid #cfe2f5; border-radius: 10px; }
+.previo-cab { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--azul); margin-bottom: 6px; }
+.previo-cuerpo { display: flex; gap: 10px; align-items: center; }
+.previo-cuerpo img { width: 76px; height: 76px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borde); }
+.previo-hora { color: var(--texto-suave); font-size: 12px; margin-top: 2px; }
+.previo-sin { color: var(--texto-suave); font-size: 13px; }
 </style>

@@ -19,6 +19,8 @@
 // Si la vista necesita saber el orden elegido (Impresión lo manda al pliego), lo
 // lee con v-model:orden y lo aplica con la MISMA función, ordenarFilas().
 import { computed, ref, watch } from 'vue'
+import SelectBase from '@/components/SelectBase.vue'
+import type { OpcionSelect } from '@/components/SelectBase.vue'
 import type { ColumnaTabla, FilaTabla } from '@/types/tabla.type'
 import { ordenarFilas, type OrdenTabla } from '@/utils/orden'
 
@@ -68,6 +70,11 @@ const opcionesPorPagina = computed(() => {
   if (props.porPagina && !base.includes(props.porPagina)) base.push(props.porPagina)
   return base.sort((a, b) => a - b)
 })
+
+/** Las mismas opciones, con la forma que pide SelectBase. */
+const opcionesPorPaginaSelect = computed<OpcionSelect<number>[]>(() =>
+  opcionesPorPagina.value.map((o) => ({ valor: o, etiqueta: String(o) })),
+)
 watch(filasPorPagina, () => {
   pagina.value = 1
 })
@@ -226,9 +233,12 @@ const rango = computed(() => {
       <div class="fila">
         <span class="tabla-rango">{{ rango }}</span>
         <label class="tabla-rango" style="margin:0">Filas por página</label>
-        <select v-model.number="filasPorPagina" style="width:auto">
-          <option v-for="o in opcionesPorPagina" :key="o" :value="o">{{ o }}</option>
-        </select>
+        <SelectBase
+          v-model="filasPorPagina"
+          :opciones="opcionesPorPaginaSelect"
+          aria-label="Filas por página"
+          class="select-paginacion"
+        />
       </div>
       <div v-if="totalPaginas > 1" class="fila">
         <button class="secundario" :disabled="pagina === 1" @click="irA(pagina - 1)">
@@ -269,4 +279,7 @@ th.ordenable:hover { color: var(--texto); }
 th.ordenada { color: var(--azul); }
 .flecha { font-size: 10px; margin-left: 4px; opacity: .4; }
 th.ordenada .flecha { opacity: 1; }
+.select-paginacion {
+  width: 90px;
+}
 </style>

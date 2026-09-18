@@ -261,9 +261,13 @@ onMounted(cargar)
     <div class="card" style="margin-bottom:16px">
       <strong>Carga masiva por CSV</strong>
       <p class="ayuda">
-        Una sola columna: el <code>código</code> del boleto (uno por fila). Si la primera fila
-        es el encabezado se saltea sola. Volver a subir el mismo listado no falla: los códigos
-        que ya existan se saltean sin tocar su estado (dentro/fuera).
+        Dos columnas: el <code>código</code> del boleto y el <code>día</code> en que vale
+        (<code>1</code>, <code>2</code> o <code>3</code>). Si la primera fila es el encabezado
+        se saltea sola. Volver a subir el mismo listado no falla y <strong>corrige el día</strong>
+        si cambió, sin tocar el estado dentro/fuera.
+        <br />
+        Estos boletos no están asociados a una persona, pero <strong>sí valen un día puntual</strong>:
+        sin día, la puerta no podría validarlos y entrarían cualquier día.
       </p>
 
       <CsvDropzone
@@ -319,13 +323,18 @@ onMounted(cargar)
               <tr>
                 <th style="width:50px">#</th>
                 <th>Código</th>
-                <th style="width:120px">Acción</th>
+                <th style="width:90px">Día</th>
+                <th style="width:150px">Acción</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="f in previa.filas" :key="f.fila">
                 <td style="color:var(--texto-suave)">{{ f.fila }}</td>
                 <td>{{ f.codigo || '—' }}</td>
+                <td>
+                  <span v-if="f.diaFeria">{{ f.diaFeria.replace('DIA_', 'Día ') }}</span>
+                  <span v-else class="error">falta</span>
+                </td>
                 <td>
                   <span v-if="f.estado === 'NUEVO'" class="chip" style="background:#dcfce7;color:#166534">
                     Nuevo

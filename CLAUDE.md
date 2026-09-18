@@ -201,6 +201,11 @@ Hecho:
   - "Anti-clones": ENTRADA estando `dentro` → `YA_DENTRO`; SALIDA estando fuera →
     `YA_FUERA`. Responde **409** con `ValidacionTicketDto` (`bloqueado=true`,
     `motivo`) y **no escribe nada**.
+  > **El QR es solo del CONCIERTO.** `Ticket` tiene `qrToken`; el `Boleto` de la
+  > feria **no tiene QR**, se valida por `codigo` tipeado o leído con pistola
+  > (el panel es un input de texto, sin cámara). Tres mundos sin FK entre sí:
+  > venta (`talonario`/`boleto_talonario`), feria (`boleto`/`movimiento_boleto`)
+  > y concierto (`ticket`/`acceso`).
   - Solo **ESTUDIANTE al ENTRAR** consulta la matrícula en **SIGSE** (API externa de
     la UAP); si no está matriculado → 409 `NO_MATRICULADO`. Si SIGSE no responde →
     `NegocioException` (400): la entrada queda bloqueada. La SALIDA no consulta SIGSE.
@@ -333,6 +338,19 @@ todos comentados en español):
   validación `.csv` + ficha del archivo. `v-model` con el `File`; emite `elegido`/
   `quitado`. Lo usan Estudiantes y Administrativos; el botón "Importar" va en su slot
   `#acciones`.
+- **`components/SelectBase.vue`** — desplegable propio, en vez del `<select>` nativo.
+  El nativo se ve distinto en cada sistema, no admite una descripción bajo cada
+  opción y en Android abre una rueda que tapa media pantalla. Éste se maneja entero
+  con el teclado (flechas, Enter, Esc, Tab), cierra con clic afuera y sus opciones
+  miden 44 px para el dedo. Es **genérico**: `v-model` conserva el tipo del valor.
+  Se le pasan `opciones` (`OpcionSelect[]`: `valor`, `etiqueta` y un `detalle`
+  opcional como segunda línea) y, para filtros, `limpiable` agrega al principio la
+  opción que devuelve el valor a `''`. Lo usan Talonarios y la **paginación de
+  `TablaDatos`**, así que toda la app comparte el mismo desplegable; las pantallas
+  de Estudiantes y Personas todavía tienen sus filtros con `<select>` nativo.
+  > Para que se vea bien dentro de un `ModalBase`, el cuerpo **no** lleva
+  > `min-width`: el ancho lo pone la prop `ancho` del modal (que ya topea en 92vw
+  > en el celular). Un `min-width` en el contenido desborda la caja y corta los textos.
 - **`components/ProgresoModal.vue`** — modal de progreso para procesos largos (emisión
   en lote, generación de PDF). Barra + "X de Y" + %, o `indeterminado` (barra animada
   sin conteo) para procesos opacos como armar un PDF de una sola llamada. No se cierra
@@ -686,6 +704,8 @@ previa de las pantallas de estudiantes y administrativos.
   los duplicados; el backend manda 409).
 - `GET /dentro` — personas con `dentro=true`.
 - `POST /api/control/boletos/cierre-jornada` — deja a todos (tickets y boletos) fuera.
+- `POST /api/control/boletos/registro-salida` — datos opcionales de quien sale
+  y va a volver (ver §8.2.1).
   Se usa al cerrar cada día; ver §8.2.
 - `GET /sigse/{ru}` — consulta de matrícula en SIGSE sin tocar la BD (siempre
   devuelve los datos, matriculado o no).
@@ -775,7 +795,14 @@ Además `POST /api/control/boletos/cierre-jornada` fuerza el reseteo de todos
 un boleto con `diaFeria` solo pasa si hoy es su día:
 - hoy no es día de feria → 409 **`FUERA_DE_FECHA`**
 - es otro día → 409 **`DIA_INCORRECTO`** (el mensaje dice de qué día es y qué día es hoy)
-- boletos de **venta suelta** (`diaFeria = null`) no se validan por día.
+
+> **TODO boleto de la feria vale un día puntual**, incluidos los de venta suelta.
+> Lo que los diferencia de los de administrativo/docente es que **no están asociados
+> a una persona** (eso va a cambiar más adelante), no el día.
+> El CSV de sueltos es **`codigo, dia`** (el día acepta `1`/`2`/`3` o `DIA_1`…), el
+> día es **obligatorio** y reimportar **corrige** el día sin tocar `dentro`.
+> Un `diaFeria = null` es una carga vieja o incompleta, **no** "no aplica": la
+> validación lo deja pasar cualquier día, así que hay que completarlo.
 
 > ⚠️ `validar-dia=false` en el perfil local **a propósito**: con la validación
 > encendida no se puede probar nada fuera del 18-20. En producción va en `true`.
@@ -796,11 +823,136 @@ del día 1. Ahora devuelve además `ingresosHoy`, `salidasHoy`, `diaHoy` y `fech
 
 ---
 
+### 8.2.1 Registro de salida ("¿va a volver a ingresar?")
+
+Al **escanear una SALIDA** de un boleto **de venta suelta** (`PARTICULAR`, sin
+persona asociada), el panel pregunta *¿Va a volver a ingresar?*. Si el operador
+marca que sí, aparece un formulario con **nombre, CI y fotografía — los tres
+opcionales** — y un botón **"No quiso dar sus datos"**.
+
+- **La salida ya quedó registrada antes de preguntar.** El formulario es un paso
+  aparte (`POST /api/control/boletos/registro-salida`) que se cuelga del
+  movimiento recién creado. Si el operador no contesta, cierra el navegador o se
+  corta la red, la salida **no se pierde**.
+- **No se le insiste a nadie.** Los datos son para reconocer a quien vuelve, no un
+  requisito: negarse **no impide** el reingreso. El botón "no quiso dar sus datos"
+  guarda una fila con `sinDatos=true`, para que quede el respaldo de que se
+  preguntó (decisión de Javier: "confiamos en nuestros ojos y memoria").
+- **Al REINGRESAR**, si ese boleto tiene registro previo, la respuesta trae
+  `registroPrevio` y el panel muestra el nombre/CI/foto y la hora de salida, para
+  que el portero compare.
+- Solo aplica a boletos **sueltos**: administrativos y docentes ya están
+  identificados por su persona.
+
+> **No se guarda en `persona`.** Tabla propia **`registro_salida`** (FK al boleto +
+> al movimiento; nombre/ci/archivoFoto nullable; `sinDatos`). `persona` es el padrón
+> institucional con `ci` **UNIQUE** y lo referencian estudiante/administrativo/
+> docente/ticket: meter ahí un dato suelto, sin CI o dado a medias, chocaría con el
+> UNIQUE (dos "sin CI" no pueden convivir) y ensuciaría los listados y filtros de
+> personas. Además es un dato de una noche, no un vínculo con la institución.
+
+**La foto se saca con la cámara, no se "sube un archivo".** El
+`<input type="file" accept="image/*" capture="environment">` va **oculto** y lo
+dispara un botón propio **"Sacar foto"** (azul, 56 px de alto, con ícono de
+cámara): el control nativo se lee como "Elegir archivo" y confunde al operador.
+`capture="environment"` abre la cámara trasera directo en el celular. Una vez
+tomada, el botón se reemplaza por una **ficha con la miniatura** + peso +
+"Repetir" / "Quitar", con el mismo estilo que el banner de datos previos.
+
+> Dos detalles que ya mordieron y hay que respetar:
+> - El input se esconde con `.campo input.input-oculto` (1x1, `opacity:0`,
+>   `min-height:0`). Con una sola clase **no alcanza**: la regla genérica
+>   `.campo input` le gana por especificidad y el input vuelve a ocupar su caja.
+>   Tampoco se usa `display:none`, que lo dejaría fuera del foco por teclado.
+> - Después de cada selección se hace `input.value = ''`. Si no, elegir **la misma**
+>   foto otra vez no dispara `change` y "Repetir" parece no hacer nada.
+
+La foto se comprime en el navegador, no se manda cruda: `utils/foto.ts` la baja
+a 480 px de lado mayor y JPEG 0.7 (~5-60 KB) antes de subirla como Base64. El
+backend topea en `MAX_FOTO = 280_000` caracteres y responde **400** con mensaje
+claro si se pasa. La orientación EXIF se corrige con
+`createImageBitmap(..., {imageOrientation:'from-image'})`.
+
+#### Dónde se guardan las fotos
+
+En una **carpeta del servidor**, no en la base de datos. En `registro_salida` queda
+solo la ruta relativa del archivo (`archivo_foto`, ej. `2026-09-18/<uuid>.jpg`).
+
+- Carpeta: `app.fotos.directorio` (default **`fotos-salida/`**, relativa al
+  directorio desde donde se arranca la app). La crea sola al arrancar
+  `AlmacenFotos` y **está en `.gitignore`**: son fotos de personas y nunca van al
+  repositorio.
+- **Subcarpeta por día** (`fotos-salida/2026-09-19/…`): borrar lo de una jornada es
+  borrar una carpeta, y ningún directorio junta miles de archivos.
+- **El nombre del archivo lo inventa siempre el servidor** (UUID). Nunca se arma con
+  datos del cliente: un nombre como `../../application.properties` permitiría
+  escribir fuera de la carpeta. Al leer se vuelve a comprobar que la ruta caiga
+  dentro de la base, porque el valor viaja por la BD.
+- La imagen **no viaja en el JSON**: `RegistroSalidaDetalleDto` trae solo
+  `tieneFoto`, y el panel la pide aparte a
+  `GET /api/control/boletos/registro-salida/foto?idRegistro=` con
+  `responseType:'blob'` + `URL.createObjectURL` (mismo patrón que los PNG/PDF de
+  tickets, porque el endpoint exige token). Así la respuesta del escáner quedó en
+  ~500 bytes en vez de arrastrar la foto entera en cada validación.
+  > El `objectURL` se libera con `URL.revokeObjectURL` al cambiar de escaneo y al
+  > desmontar: un puesto escanea cientos por noche y si no se retienen todas.
+
+> ⚠️ **Al desplegar hay que poder escribir en esa carpeta.** Si el proceso no
+> puede crearla, la app **falla al arrancar** a propósito (no al sacar la primera
+> foto, cuando ya hay gente en la puerta). Y ojo: **la carpeta no está en el backup
+> de la base**; si se respalda solo Postgres, las fotos no se respaldan.
+
+> **Pendiente de decidir (privacidad):** hoy las fotos no se borran nunca. Borrar
+> la carpeta del día es suficiente para eliminarlas; quedan el nombre, el CI y el
+> registro de la salida.
+
+> Al guardar, el panel se **limpia entero** (no solo cierra el formulario): si solo
+> se cerrara volvería a aparecer la pregunta para alguien ya registrado y el
+> operador no sabría si le quedó guardado.
+
 ## 8.3 Venta de boletos por talonario (feria)
 
 **Es un universo SEPARADO del boleto que se escanea en la puerta.** Acá no se controla
 ingreso: solo se registra **qué boletos de qué talonario se vendieron**, para poder
 cuadrar con cada vendedora.
+
+> ⚠️ **`DestinoTalonario` y `TipoTalonario` son SOLO de este módulo de VENTAS.**
+> El control de ingreso a la feria no los conoce: ahí el boleto vale un **día**
+> (`DiaFeria`). Son dos mundos separados a propósito; no mezclar el vocabulario.
+
+### La numeración la parte el par (destino, evento)
+
+Un talonario tiene **dos** dimensiones, y las dos juntas definen su serie de números:
+
+| Dimensión | Enum | Valores |
+|---|---|---|
+| A qué se entra | `DestinoTalonario` | `CONCIERTO`, `FERIA`, `PARQUEO` |
+| Para qué evento | `TipoTalonario` | `EVENTO_1/2/3`, `COMBO` |
+
+**Cada par lleva su propia numeración y todos arrancan en 1.** El boleto 250 de
+`FERIA/EVENTO_1`, el de `PARQUEO/EVENTO_1` y el de `FERIA/COMBO` son tres boletos
+distintos. Por eso el solape de rangos **solo** se rechaza cuando coinciden **los
+dos** campos: `TalonarioDao.solapados` filtra por `destino` **y** `tipo`. Si se
+filtrara solo por `tipo`, un talonario de parqueo 1-200 bloquearía el de feria
+1-200, que es justamente lo que tiene que poder convivir.
+
+Lo mismo vale para:
+- **`ultimoNumero`** (encadenar sin huecos): cuenta por par, así que generar en
+  `PARQUEO/EVENTO_3` arranca en 1 aunque `FERIA/EVENTO_1` vaya por el 400.
+- **El nombre**: es único **dentro** del par, no global. "Talonario A" existe a la
+  vez en Concierto, Feria y Parqueo y son tres talonarios distintos.
+
+Los mensajes de error nombran el ámbito ("Feria · Evento 1") para que se entienda
+por qué chocó o por qué no.
+
+> **El evento es obligatorio en los tres destinos**, incluido parqueo. Decisión de
+> Javier (2026-09-18): el parqueo hoy no suele distinguir día, "pero es mejor
+> prevenir". No hay talonario sin evento; si mañana hace falta una serie única,
+> se usa un valor propio, **no** `null`.
+
+> ⚠️ Al agregar un destino nuevo hay que recrear a mano el CHECK
+> `talonario_destino_check` (misma trampa que `ticket_categoria_check`, ver §2):
+> `ddl-auto=update` **no** lo actualiza y el primer insert del valor nuevo falla.
 
 ### El modelo de negocio (confirmado con Javier, no reinterpretarlo)
 
@@ -820,9 +972,10 @@ en `TipoTalonario` y **no** en `DiaFeria`: metido ahí rompería la validación 
 
 ### Reglas
 
-- **Sin solapes dentro del mismo tipo.** Dos talonarios de `EVENTO_1` con 1-200 y
-  150-350 dejarían 51 boletos en dos talonarios y el cuadre no cerraría nunca.
-  Entre tipos distintos el solape es normal y está permitido.
+- **Sin solapes dentro del mismo (destino, evento).** Dos talonarios de
+  `FERIA/EVENTO_1` con 1-200 y 150-350 dejarían 51 boletos en dos talonarios y el
+  cuadre no cerraría nunca. Entre destinos distintos, o entre eventos distintos, el
+  solape es normal y está permitido.
 - **Un ANULADO no revive con una marca masiva.** "Vendidos hasta el 137" pasa por
   encima de los anulados sin tocarlos y avisa; solo se los corrige nombrándolos
   **explícitamente** en la lista de números.
@@ -830,21 +983,41 @@ en `TipoTalonario` y **no** en `DiaFeria`: metido ahí rompería la validación 
   `_modificacion_id_usuario` es `@LastModifiedBy` y lo pisa cualquier update posterior.
 - **Aislamiento:** una vendedora solo ve y marca los talonarios asignados a ella
   (`listar?soloMios=true` + verificación en el service). El ADMINISTRADOR ve todos.
+- **Una vendedora lleva VARIOS talonarios, de cualquier destino y evento** (parqueo
+  + concierto + feria a la vez). El modelo siempre lo permitió — `usuarioAsignado`
+  es un `@ManyToOne` desde `Talonario`, así que del lado de la persona son muchos y
+  no hay ninguna regla que los limite a un destino. Lo que se agregó (2026-09-18) es
+  la forma de hacerlo sin editar talonario por talonario: `PATCH /asignar`.
+- **Reasignar NO pierde las ventas ya hechas.** Quién vendió cada boleto vive en
+  `BoletoTalonario.vendidoPor`, que es del boleto, no del talonario. Un talonario a
+  medio vender puede pasar de mano y el cuadre sigue cerrando.
 - El precio es **opcional** y va en **bolivianos (Bs)**.
 
 ### Endpoints — `/api/talonarios` (ADMINISTRADOR + VENTA_FERIA)
 
-- `GET /listar?tipo=&soloMios=` · `GET /obtener?idTalonario=` · `GET /boletos?idTalonario=`
-- `POST /crear` · `POST /generar` (varios correlativos de un tipo, sin huecos) —
-  **solo ADMINISTRADOR**
-- `PUT /actualizar?idTalonario=` — nombre, precio y vendedora. **El tipo y el rango
-  no se editan**: ya generaron sus boletos.
+- `GET /listar?destino=&tipo=&soloMios=` (los dos filtros son opcionales y se
+  combinan) · `GET /obtener?idTalonario=` · `GET /boletos?idTalonario=`
+- `POST /crear` · `POST /generar` (varios correlativos de un mismo (destino, tipo),
+  sin huecos) — **solo ADMINISTRADOR**
+- `PUT /actualizar?idTalonario=` — nombre, precio y vendedora. **El destino, el tipo
+  y el rango no se editan**: ya generaron sus boletos.
 - `DELETE /eliminar?idTalonario=` — rechaza si ya hay ventas.
 - `PATCH /marcar` — `hastaNumero` (rendición al cierre), `desde`+`hasta`, o `numeros`
   sueltos. Se pueden combinar.
+- `PATCH /asignar` — **solo ADMINISTRADOR**. Body `{idUsuario, idTalonarios[]}`.
+  Reasigna de una vez todos los talonarios de una vendedora; pueden ser de destinos
+  y eventos distintos. Devuelve `{vendedora, asignados, quitados, total}`.
+  > ⚠️ **La lista es el estado FINAL, no un agregado.** Los talonarios que vienen
+  > quedan a su cargo y **los que hoy tiene y no vienen quedan sin asignar**. Es a
+  > propósito: la pantalla es una sola lista de casillas ("estos son los talonarios
+  > de Fulana") en vez de dos acciones de agregar y quitar, que es donde se cometen
+  > errores. Mandar `idTalonarios: []` la deja sin ninguno.
 
-Pantallas: **`/talonarios`** (admin) y **`/mis-talonarios`** (vendedora, pensada para
-el celular: buscador arriba, marcado abajo, grilla con toques de 44 px).
+Pantallas: **`/talonarios`** (admin, con columna y filtro de destino) y
+**`/mis-talonarios`** (vendedora, pensada para el celular: buscador arriba, marcado
+abajo, grilla con toques de 44 px). En las dos el destino se muestra **antes** que el
+evento: con los números repetidos entre destinos, es lo único que distingue dos
+talonarios que se ven iguales.
 
 > Generar boletos NO es un problema de rendimiento: medido, **10.000 filas en 214 ms**.
 > El OOM/timeout que hay documentado en §2 es de armar PDFs con miles de imágenes,
@@ -972,6 +1145,11 @@ Acceso  (validación / log de escaneos)
   tipo      ENTRADA | SALIDA
   fechaHora
   + auditoría / estado (el usuario CONTROL que escanea queda en _registro_id_usuario)
+
+RegistroSalida  (datos opcionales de quien sale y va a volver; ver 8.2.1)
+  idRegistro (PK) · boleto (FK) · movimiento (FK) · nombre · ci · foto (Base64, todos nullable)
+  · sinDatos (true = se le preguntó y no quiso dar sus datos)
+  + auditoría / estado. NO es una Persona: dato de una noche, sin CI obligatorio.
 
 DispositivoBiometrico (equipos ZKTeco)
   idDispositivo (PK) · nombre · ip · puerto (4370) · timeoutMs · activo

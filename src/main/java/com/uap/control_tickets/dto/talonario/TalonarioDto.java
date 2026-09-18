@@ -1,5 +1,6 @@
 package com.uap.control_tickets.dto.talonario;
 
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.TipoTalonario;
 import jakarta.validation.constraints.*;
 import lombok.Data;
@@ -12,6 +13,9 @@ public class TalonarioDto {
 
     @NotBlank(message = "El nombre del talonario es obligatorio")
     private String nombre;
+
+    @NotNull(message = "Indique el destino (concierto, feria o parqueo)")
+    private DestinoTalonario destino;
 
     @NotNull(message = "Indique el tipo (evento 1/2/3 o combo)")
     private TipoTalonario tipo;

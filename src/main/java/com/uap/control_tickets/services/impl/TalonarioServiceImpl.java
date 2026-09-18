@@ -1,6 +1,7 @@
 package com.uap.control_tickets.services.impl;
 
 import com.uap.control_tickets.dto.talonario.*;
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.enums.EstadoVenta;
 import com.uap.control_tickets.enums.TipoTalonario;
@@ -30,8 +31,9 @@ import java.util.Set;
  * Control de venta de boletos por talonario.
  *
  * Universo SEPARADO del Boleto que se escanea en la puerta: aca los numeros se
- * repiten entre tipos (el 250 del EVENTO_1 y el 250 del COMBO son distintos) y lo
- * que identifica a un boleto es (talonario, numero).
+ * repiten entre destinos y entre tipos (el 250 de FERIA/EVENTO_1, el de
+ * PARQUEO/EVENTO_1 y el de FERIA/COMBO son tres boletos distintos) y lo que
+ * identifica a un boleto es (talonario, numero).
  */
 @Slf4j
 @Service
@@ -44,18 +46,15 @@ public class TalonarioServiceImpl implements TalonarioService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TalonarioDetalleDto> listar(TipoTalonario tipo, boolean soloMios) {
-        List<Talonario> talonarios;
-        if (soloMios) {
-            Usuario yo = usuarioActual();
-            talonarios = talonarioDao.findAllByUsuarioAsignadoIdUsuarioAndEstadoOrderByTipoAscNumeroDesdeAsc(
-                    yo.getIdUsuario(), EstadoRegistro.ACTIVO);
-            if (tipo != null) talonarios = talonarios.stream().filter(t -> t.getTipo() == tipo).toList();
-        } else if (tipo != null) {
-            talonarios = talonarioDao.findAllByTipoAndEstadoOrderByNumeroDesdeAsc(tipo, EstadoRegistro.ACTIVO);
-        } else {
-            talonarios = talonarioDao.findAllByEstadoOrderByTipoAscNumeroDesdeAsc(EstadoRegistro.ACTIVO);
-        }
+    public List<TalonarioDetalleDto> listar(DestinoTalonario destino, TipoTalonario tipo, boolean soloMios) {
+        // Los dos filtros son opcionales y se combinan; se aplican en memoria
+        // porque la lista entera son decenas de filas, no miles.
+        List<Talonario> talonarios = soloMios
+                ? talonarioDao.findAllByUsuarioAsignadoIdUsuarioAndEstadoOrderByDestinoAscTipoAscNumeroDesdeAsc(
+                        usuarioActual().getIdUsuario(), EstadoRegistro.ACTIVO)
+                : talonarioDao.findAllByEstadoOrderByDestinoAscTipoAscNumeroDesdeAsc(EstadoRegistro.ACTIVO);
+        if (destino != null) talonarios = talonarios.stream().filter(t -> t.getDestino() == destino).toList();
+        if (tipo != null) talonarios = talonarios.stream().filter(t -> t.getTipo() == tipo).toList();
         return talonarios.stream().map(this::toDetalle).toList();
     }
 
@@ -70,6 +69,7 @@ public class TalonarioServiceImpl implements TalonarioService {
     public TalonarioDetalleDto crear(TalonarioDto dto) {
         Talonario t = new Talonario();
         t.setNombre(dto.getNombre().trim());
+        t.setDestino(dto.getDestino());
         t.setTipo(dto.getTipo());
         t.setNumeroDesde(dto.getNumeroDesde());
         t.setNumeroHasta(dto.getNumeroHasta());
@@ -77,8 +77,9 @@ public class TalonarioServiceImpl implements TalonarioService {
         t.setUsuarioAsignado(resolverUsuario(dto.getIdUsuarioAsignado()));
 
         validarRango(t, null);
-        if (talonarioDao.existsByNombreAndEstado(t.getNombre(), EstadoRegistro.ACTIVO)) {
-            throw new NegocioException("Ya existe un talonario llamado '" + t.getNombre() + "'");
+        if (nombreOcupado(t, t.getNombre())) {
+            throw new NegocioException("Ya existe un talonario llamado '" + t.getNombre()
+                    + "' en " + ambito(t));
         }
         talonarioDao.save(t);
         generarBoletos(t);
@@ -91,10 +92,11 @@ public class TalonarioServiceImpl implements TalonarioService {
         int cantidad = dto.getCantidadTalonarios();
         int porTalonario = dto.getBoletosPorTalonario();
 
-        // Sin numero inicial, se encadena despues del ultimo del tipo (sin huecos).
+        // Sin numero inicial, se encadena despues del ultimo de ESE par
+        // (destino, tipo), sin huecos. Cada par lleva su propia cuenta.
         int inicio = dto.getNumeroInicial() != null
                 ? dto.getNumeroInicial()
-                : talonarioDao.ultimoNumero(dto.getTipo(), EstadoRegistro.ACTIVO) + 1;
+                : talonarioDao.ultimoNumero(dto.getDestino(), dto.getTipo(), EstadoRegistro.ACTIVO) + 1;
 
         String prefijo = dto.getPrefijoNombre() == null || dto.getPrefijoNombre().isBlank()
                 ? "Talonario" : dto.getPrefijoNombre().trim();
@@ -104,19 +106,20 @@ public class TalonarioServiceImpl implements TalonarioService {
         for (int i = 1; i <= cantidad; i++) {
             int hasta = desde + porTalonario - 1;
             Talonario t = new Talonario();
+            t.setDestino(dto.getDestino());
             t.setTipo(dto.getTipo());
             t.setNumeroDesde(desde);
             t.setNumeroHasta(hasta);
             t.setPrecioUnitario(dto.getPrecioUnitario());
-            t.setNombre(nombreLibre(prefijo, desde, hasta));
+            t.setNombre(nombreLibre(t, prefijo, desde, hasta));
             validarRango(t, null);
             talonarioDao.save(t);
             generarBoletos(t);
             creados.add(toDetalle(t));
             desde = hasta + 1;
         }
-        log.info("Generados {} talonarios de {} boletos para {} (del {} al {}).",
-                cantidad, porTalonario, dto.getTipo(), inicio, desde - 1);
+        log.info("Generados {} talonarios de {} boletos para {}/{} (del {} al {}).",
+                cantidad, porTalonario, dto.getDestino(), dto.getTipo(), inicio, desde - 1);
         return creados;
     }
 
@@ -125,15 +128,67 @@ public class TalonarioServiceImpl implements TalonarioService {
     public TalonarioDetalleDto actualizar(Long idTalonario, TalonarioActualizarDto dto) {
         Talonario t = buscar(idTalonario);
         String nombre = dto.getNombre().trim();
-        if (!nombre.equalsIgnoreCase(t.getNombre())
-                && talonarioDao.existsByNombreAndEstado(nombre, EstadoRegistro.ACTIVO)) {
-            throw new NegocioException("Ya existe un talonario llamado '" + nombre + "'");
+        if (!nombre.equalsIgnoreCase(t.getNombre()) && nombreOcupado(t, nombre)) {
+            throw new NegocioException("Ya existe un talonario llamado '" + nombre
+                    + "' en " + ambito(t));
         }
         t.setNombre(nombre);
         t.setPrecioUnitario(dto.getPrecioUnitario());
         t.setUsuarioAsignado(resolverUsuario(dto.getIdUsuarioAsignado()));
         talonarioDao.save(t);
         return toDetalle(t);
+    }
+
+    /**
+     * Deja los talonarios de una vendedora exactamente como dice la lista.
+     *
+     * Reasignar es seguro para el cuadre: quien vendio cada boleto queda en
+     * `BoletoTalonario.vendidoPor`, que es un campo propio del boleto y no se toca
+     * al cambiarle el duenio al talonario. Un talonario a medio vender puede pasar
+     * de mano sin perder las ventas ya hechas.
+     */
+    @Override
+    @Transactional
+    public ResultadoAsignacionDto asignar(AsignacionTalonariosDto dto) {
+        Usuario vendedora = usuarioDao.findById(dto.getIdUsuario())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Vendedora no encontrada"));
+
+        Set<Long> pedidos = dto.getIdTalonarios() == null
+                ? Set.of()
+                : new LinkedHashSet<>(dto.getIdTalonarios());
+
+        List<Talonario> actuales = talonarioDao
+                .findAllByUsuarioAsignadoIdUsuarioAndEstadoOrderByDestinoAscTipoAscNumeroDesdeAsc(
+                        vendedora.getIdUsuario(), EstadoRegistro.ACTIVO);
+
+        ResultadoAsignacionDto r = new ResultadoAsignacionDto();
+        r.setVendedora(vendedora.getUsername());
+
+        // Los que hoy tiene y ya no estan en la lista: quedan sin asignar.
+        List<Talonario> cambiados = new ArrayList<>();
+        for (Talonario t : actuales) {
+            if (!pedidos.contains(t.getIdTalonario())) {
+                t.setUsuarioAsignado(null);
+                cambiados.add(t);
+                r.setQuitados(r.getQuitados() + 1);
+            }
+        }
+
+        // Los de la lista que todavia no son suyos.
+        for (Long id : pedidos) {
+            Talonario t = buscar(id);
+            Usuario actual = t.getUsuarioAsignado();
+            if (actual != null && actual.getIdUsuario().equals(vendedora.getIdUsuario())) continue;
+            t.setUsuarioAsignado(vendedora);
+            cambiados.add(t);
+            r.setAsignados(r.getAsignados() + 1);
+        }
+
+        talonarioDao.saveAll(cambiados);
+        r.setTotal(pedidos.size());
+        log.info("Talonarios de {}: +{} / -{} (quedan {}).",
+                vendedora.getUsername(), r.getAsignados(), r.getQuitados(), r.getTotal());
+        return r;
     }
 
     @Override
@@ -256,27 +311,43 @@ public class TalonarioServiceImpl implements TalonarioService {
         boletoDao.saveAll(nuevos);
     }
 
-    /** El rango tiene que ser coherente y no pisarse con otro talonario del MISMO tipo. */
+    /**
+     * El rango tiene que ser coherente y no pisarse con otro talonario del MISMO
+     * destino Y el MISMO tipo. Entre destinos distintos (feria vs parqueo) o entre
+     * eventos distintos, repetir los numeros es lo esperado.
+     */
     private void validarRango(Talonario t, Long idExcluir) {
         if (t.getNumeroDesde() > t.getNumeroHasta()) {
             throw new NegocioException("El número inicial no puede ser mayor que el final");
         }
         List<Talonario> choques = talonarioDao.solapados(
-                t.getTipo(), t.getNumeroDesde(), t.getNumeroHasta(), EstadoRegistro.ACTIVO, idExcluir);
+                t.getDestino(), t.getTipo(), t.getNumeroDesde(), t.getNumeroHasta(),
+                EstadoRegistro.ACTIVO, idExcluir);
         if (!choques.isEmpty()) {
             Talonario c = choques.get(0);
             throw new NegocioException("El rango " + t.getNumeroDesde() + "-" + t.getNumeroHasta()
-                    + " de " + t.getTipo().etiqueta() + " se solapa con '" + c.getNombre()
+                    + " de " + ambito(t) + " se solapa con '" + c.getNombre()
                     + "' (" + c.getNumeroDesde() + "-" + c.getNumeroHasta() + ")");
         }
     }
 
-    /** Evita chocar con el UNIQUE del nombre cuando se generan muchos de una. */
-    private String nombreLibre(String prefijo, int desde, int hasta) {
+    /** "Feria · Evento 1": el par que define el espacio de numeracion, para los mensajes. */
+    private String ambito(Talonario t) {
+        return t.getDestino().etiqueta() + " · " + t.getTipo().etiqueta();
+    }
+
+    /** El nombre solo tiene que ser unico DENTRO del par (destino, tipo). */
+    private boolean nombreOcupado(Talonario t, String nombre) {
+        return talonarioDao.existsByDestinoAndTipoAndNombreIgnoreCaseAndEstado(
+                t.getDestino(), t.getTipo(), nombre, EstadoRegistro.ACTIVO);
+    }
+
+    /** Evita chocar con el nombre repetido cuando se generan muchos de una. */
+    private String nombreLibre(Talonario t, String prefijo, int desde, int hasta) {
         String base = prefijo + " " + desde + "-" + hasta;
         String nombre = base;
         int i = 2;
-        while (talonarioDao.existsByNombreAndEstado(nombre, EstadoRegistro.ACTIVO)) {
+        while (nombreOcupado(t, nombre)) {
             nombre = base + " (" + i++ + ")";
         }
         return nombre;
@@ -319,6 +390,8 @@ public class TalonarioServiceImpl implements TalonarioService {
         TalonarioDetalleDto d = new TalonarioDetalleDto();
         d.setIdTalonario(t.getIdTalonario());
         d.setNombre(t.getNombre());
+        d.setDestino(t.getDestino().name());
+        d.setDestinoEtiqueta(t.getDestino().etiqueta());
         d.setTipo(t.getTipo().name());
         d.setTipoEtiqueta(t.getTipo().etiqueta());
         d.setNumeroDesde(t.getNumeroDesde());

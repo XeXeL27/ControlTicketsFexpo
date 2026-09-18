@@ -41,4 +41,17 @@ public interface ControlBoletoService {
      * @return cuantos tickets y boletos se pusieron en fuera.
      */
     int cerrarJornada();
+
+    /**
+     * Guarda los datos que dio el visitante al salir diciendo que va a volver.
+     * Los tres campos son opcionales; sin ninguno queda `sinDatos=true`.
+     */
+    com.uap.control_tickets.dto.control.RegistroSalidaDetalleDto registrarSalida(
+            com.uap.control_tickets.dto.control.RegistroSalidaDto dto);
+
+    /**
+     * Bytes (JPEG) de la foto de un registro de salida, o null si no tiene.
+     * La imagen se guarda en una carpeta del disco, no en la BD.
+     */
+    byte[] fotoDeRegistro(Long idRegistro);
 }

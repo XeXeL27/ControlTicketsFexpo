@@ -12,8 +12,14 @@ import com.uap.control_tickets.models.entity.Boleto;
 import com.uap.control_tickets.models.entity.MovimientoBoleto;
 import com.uap.control_tickets.models.entity.Ticket;
 import com.uap.control_tickets.models.repository.BoletoDao;
+import com.uap.control_tickets.models.entity.RegistroSalida;
 import com.uap.control_tickets.models.repository.MovimientoBoletoDao;
+import com.uap.control_tickets.models.repository.RegistroSalidaDao;
+import com.uap.control_tickets.models.repository.UsuarioDao;
+import com.uap.control_tickets.dto.control.RegistroSalidaDetalleDto;
+import com.uap.control_tickets.dto.control.RegistroSalidaDto;
 import com.uap.control_tickets.models.repository.TicketDao;
+import com.uap.control_tickets.services.almacen.AlmacenFotos;
 import com.uap.control_tickets.services.interfaces.ControlBoletoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,7 +53,10 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
     private final MovimientoBoletoDao movimientoBoletoDao;
     private final BoletoEventosPublisher eventos;
     private final CalendarioFeria calendario;
+    private final RegistroSalidaDao registroSalidaDao;
+    private final UsuarioDao usuarioDao;
     private final TicketDao ticketDao;
+    private final AlmacenFotos almacenFotos;
 
     @Override
     @Transactional
@@ -134,7 +143,19 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         dto.setDentro(boleto.isDentro());
         dto.setUltimoTipo(tipoMovimiento.name());
         dto.setUltimaFecha(mov.getFechaHora());
+        dto.setIdMovimiento(mov.getIdMovimiento());
         if (boleto.isDentro()) dto.setEntrada(mov.getFechaHora());
+
+        // Al REINGRESAR se le muestra al control lo que esta persona dejó la última
+        // vez que salió, para que compare. Solo tiene sentido en boletos sueltos:
+        // los de administrativo/docente ya vienen con su persona.
+        if (tipoMovimiento == TipoAcceso.ENTRADA
+                && boleto.getAdministrativo() == null && boleto.getDocente() == null) {
+            registroSalidaDao
+                    .findTopByBoletoIdBoletoAndEstadoOrderByIdRegistroDesc(
+                            boleto.getIdBoleto(), EstadoRegistro.ACTIVO)
+                    .ifPresent(r -> dto.setRegistroPrevio(toRegistroDto(r)));
+        }
 
         eventos.publicar(evento(tipoMovimiento.name(), cod, null, boleto));
         return dto;
@@ -216,6 +237,83 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
                 dentro.size(), tickets.size());
         eventos.publicar(evento("CIERRE_JORNADA", "", null, null));
         return n;
+    }
+
+    /**
+     * Guarda los datos que dio el visitante al salir diciendo que vuelve.
+     *
+     * Se llama DESPUÉS de que la salida ya quedó registrada, nunca antes: si la
+     * cámara falla o el operador cancela, la salida no se puede perder, porque si
+     * no la persona queda "adentro" y al volver la rebota el anti-clones.
+     */
+    @Override
+    @Transactional
+    public RegistroSalidaDetalleDto registrarSalida(RegistroSalidaDto dto) {
+        Boleto boleto = boletoDao.findById(dto.getIdBoleto())
+                .filter(b -> b.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Boleto no encontrado"));
+
+        String foto = dto.getFoto();
+        if (foto != null && foto.length() > MAX_FOTO) {
+            throw new NegocioException(
+                    "La foto es demasiado grande. Debe comprimirse antes de enviarla.");
+        }
+
+        RegistroSalida r = new RegistroSalida();
+        r.setBoleto(boleto);
+        r.setNombre(limpiar(dto.getNombre()));
+        r.setCi(limpiar(dto.getCi()));
+        // Los bytes van al disco; en la BD queda solo la ruta del archivo.
+        r.setArchivoFoto(almacenFotos.guardar(foto));
+        // Si no dio ningún dato queda marcado como tal, aunque el control no haya
+        // apretado el botón: el respaldo tiene que reflejar la realidad.
+        r.setSinDatos(dto.isSinDatos() || !r.tieneDatos());
+
+        // Se engancha a la última salida de ese boleto, si la hay.
+        movimientoBoletoDao.findTopByBoletoIdBoletoOrderByFechaHoraDesc(boleto.getIdBoleto())
+                .filter(m -> m.getTipo() == TipoAcceso.SALIDA)
+                .ifPresent(r::setMovimiento);
+
+        registroSalidaDao.save(r);
+        log.info("Registro de salida del boleto {} (datos: {}).",
+                boleto.getCodigo(), r.isSinDatos() ? "no quiso dar" : "sí");
+        return toRegistroDto(r);
+    }
+
+    /** Tope de la foto ya comprimida: ~200 KB en base64 es de sobra para comparar caras. */
+    private static final int MAX_FOTO = 280_000;
+
+    /**
+     * Bytes de la foto de un registro, para el endpoint que la sirve.
+     * Devuelve null si ese registro no tiene foto o si el archivo ya no esta.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] fotoDeRegistro(Long idRegistro) {
+        RegistroSalida r = registroSalidaDao.findById(idRegistro)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Registro no encontrado"));
+        return almacenFotos.leer(r.getArchivoFoto());
+    }
+
+    private String limpiar(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    private RegistroSalidaDetalleDto toRegistroDto(RegistroSalida r) {
+        RegistroSalidaDetalleDto d = new RegistroSalidaDetalleDto();
+        d.setIdRegistro(r.getIdRegistro());
+        d.setNombre(r.getNombre());
+        d.setCi(r.getCi());
+        d.setTieneFoto(r.getArchivoFoto() != null);
+        d.setSinDatos(r.isSinDatos());
+        d.setFecha(r.getFechaRegistro());
+        if (r.getRegistroIdUsuario() != null) {
+            usuarioDao.findById(r.getRegistroIdUsuario())
+                    .ifPresent(u -> d.setRegistradoPor(u.getUsername()));
+        }
+        return d;
     }
 
     private EventoBoletoDto evento(String tipo, String codigo, String motivo, Boleto boleto) {

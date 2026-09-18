@@ -2,6 +2,8 @@ package com.uap.control_tickets.controllers.control;
 
 import com.uap.control_tickets.dto.control.BoletoDentroDto;
 import com.uap.control_tickets.dto.control.ResumenBoletosDto;
+import com.uap.control_tickets.dto.control.RegistroSalidaDetalleDto;
+import com.uap.control_tickets.dto.control.RegistroSalidaDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoRequestDto;
 import com.uap.control_tickets.services.interfaces.ControlBoletoService;
@@ -10,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -61,6 +64,28 @@ public class ControlBoletoController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(controlBoletoService.resumen());
     }
 
+
+    @GetMapping(value = "/registro-salida/foto", produces = MediaType.IMAGE_JPEG_VALUE)
+    @Operation(summary = "Foto del visitante registrada al salir",
+            description = "Devuelve el JPEG guardado en la carpeta de fotos. 404 si ese "
+                    + "registro no tiene foto. Exige token, así que el frontend la pide "
+                    + "con responseType 'blob' y no con <img src>.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
+    public ResponseEntity<byte[]> fotoDeRegistro(@RequestParam Long idRegistro) {
+        byte[] jpg = controlBoletoService.fotoDeRegistro(idRegistro);
+        return jpg == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(jpg);
+    }
+
+    @PostMapping("/registro-salida")
+    @Operation(summary = "Registrar los datos del visitante que dijo que va a volver",
+            description = "Se llama DESPUÉS de la salida, nunca antes: la salida no puede "
+                    + "depender de este formulario. Nombre, CI y foto son opcionales; "
+                    + "sin ninguno queda sinDatos=true como respaldo de que se preguntó.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
+    public ResponseEntity<RegistroSalidaDetalleDto> registrarSalida(
+            @Valid @RequestBody RegistroSalidaDto dto) {
+        return ResponseEntity.ok(controlBoletoService.registrarSalida(dto));
+    }
 
     @PostMapping("/cierre-jornada")
     @Operation(summary = "Cierra la jornada: deja a todos (tickets y boletos) como fuera",

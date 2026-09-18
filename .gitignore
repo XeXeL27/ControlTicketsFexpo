@@ -37,3 +37,7 @@ frontend/.env.local
 
 ### Artefactos de build del frontend ###
 frontend/*.tsbuildinfo
+
+# Fotos del registro de salida (§8.2.1): son fotos de personas y ademas
+# se regeneran en cada entorno. Nunca van al repositorio.
+fotos-salida/

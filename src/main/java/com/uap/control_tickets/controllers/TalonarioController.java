@@ -1,6 +1,7 @@
 package com.uap.control_tickets.controllers;
 
 import com.uap.control_tickets.dto.talonario.*;
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.TipoTalonario;
 import com.uap.control_tickets.services.interfaces.TalonarioService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,9 +35,10 @@ public class TalonarioController {
                     + "(es lo que usa la pantalla de la vendedora).")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'VENTA_FERIA')")
     public ResponseEntity<List<TalonarioDetalleDto>> listar(
+            @RequestParam(required = false) DestinoTalonario destino,
             @RequestParam(required = false) TipoTalonario tipo,
             @RequestParam(defaultValue = "false") boolean soloMios) {
-        return ResponseEntity.ok(talonarioService.listar(tipo, soloMios));
+        return ResponseEntity.ok(talonarioService.listar(destino, tipo, soloMios));
     }
 
     @GetMapping("/obtener")
@@ -86,6 +88,18 @@ public class TalonarioController {
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'VENTA_FERIA')")
     public ResponseEntity<List<BoletoTalonarioDto>> boletos(@RequestParam Long idTalonario) {
         return ResponseEntity.ok(talonarioService.boletos(idTalonario));
+    }
+
+    @PatchMapping("/asignar")
+    @Operation(summary = "Reasignar de una vez todos los talonarios de una vendedora",
+            description = "La lista es el estado FINAL: los que vienen quedan a su cargo y "
+                    + "los que hoy tiene y no vienen quedan sin asignar. Pueden ser de "
+                    + "varios destinos y eventos a la vez. Reasignar no pierde las ventas "
+                    + "ya hechas: quien vendió cada boleto queda en el boleto.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ResultadoAsignacionDto> asignar(
+            @Valid @RequestBody AsignacionTalonariosDto dto) {
+        return ResponseEntity.ok(talonarioService.asignar(dto));
     }
 
     @PatchMapping("/marcar")

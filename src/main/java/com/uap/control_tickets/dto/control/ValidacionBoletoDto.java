@@ -35,4 +35,14 @@ public class ValidacionBoletoDto {
     private String nombrePersona;
     /** DIA_1/DIA_2/DIA_3 (null si es PARTICULAR). */
     private String diaFeria;
+
+    /**
+     * Datos que dejó esta persona la última vez que salió diciendo que volvía.
+     * Va en la respuesta de ENTRADA para que el control compare cara y dato.
+     * null = nunca registró nada (o es un boleto asociado, que ya tiene persona).
+     */
+    private RegistroSalidaDetalleDto registroPrevio;
+
+    /** Id del movimiento recién creado: lo usa la puerta para adjuntar el registro. */
+    private Long idMovimiento;
 }
