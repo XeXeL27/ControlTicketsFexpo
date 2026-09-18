@@ -141,6 +141,14 @@ Hecho:
   > `ALTER TABLE ticket DROP CONSTRAINT IF EXISTS ticket_categoria_check;`
   > `ALTER TABLE ticket ADD CONSTRAINT ticket_categoria_check CHECK (categoria IN ('ESTUDIANTE','ADMINISTRATIVO','DOCENTE','EXTERNO'));`
   > Ya aplicado en la BD local; **en producción (ddl-auto=validate) hay que correrlo al desplegar.**
+  >
+  > ⚠️ **Mismo tipo de trampa con los boolean NOT NULL.** Un `@Column(nullable = false)`
+  > sin `columnDefinition` genera `add column x boolean not null` **sin default**, y
+  > Postgres lo RECHAZA si la tabla ya tiene filas: la columna no se crea y todas las
+  > consultas de esa entidad pasan a dar 500. Le pasó a `Estudiante.tieneHuella`
+  > (2026-09-17, tumbó Estudiantes/Impresión/Entrega). **Siempre**
+  > `columnDefinition = "boolean not null default false"`, como `Ticket.dentro/impreso/entregado`.
+  > `ddl-auto=update` falla en silencio: deja un WARN en el arranque y sigue.
 
 - **Control de ENTREGA de tickets**: marcar a quién se entregó el ticket físico. Campos
   `Ticket.entregado` + `fechaEntrega` (quién marcó queda en la auditoría);
@@ -382,8 +390,15 @@ Ver **docs/GUIA-COMPRENSION.md** para el recorrido detallado de cada pieza.
 - **CORS**: solo se permite el origen del frontend (properties).
 - Rutas públicas: `/api/auth/**` y Swagger. Todo lo demás exige token.
 
-**Roles del sistema:** `ADMINISTRADOR` (gestiona todo) y `CONTROL` (portero/escáner,
-para la fase 2). Se crean solos al arrancar (`AdminInitializer`).
+**Roles del sistema** (se crean solos en `AdminInitializer`): `ADMINISTRADOR`,
+`CONTROL_CONCIERTO` (escáner del concierto), `CONTROL_FERIA` (escáner de la feria)
+y `VENTA_FERIA` (vendedora de talonarios).
+
+> ⚠️ **Todo rol nuevo hay que sumarlo a `rutaInicio()` en `router/index.ts`.** Si no
+> tiene pantalla de inicio cae al `'/'`, que es solo de ADMINISTRADOR, y la guarda lo
+> devuelve a `'/'` → **bucle infinito de redirección**. Ya pasó con `VENTA_FERIA`
+> (2026-09-17). El fallback ahora cierra sesión en vez de girar, pero igual hay que
+> mapear el rol.
 
 ---
 
@@ -728,6 +743,130 @@ un boleto con `diaFeria` solo pasa si hoy es su día:
 `resumen()` sumaba todo el evento, así que el día 2 el tablero mostraba los ingresos
 del día 1. Ahora devuelve además `ingresosHoy`, `salidasHoy`, `diaHoy` y `fechaHoy`
 (los `...Total` siguen siendo acumulados).
+
+---
+
+## 8.3 Venta de boletos por talonario (feria)
+
+**Es un universo SEPARADO del boleto que se escanea en la puerta.** Acá no se controla
+ingreso: solo se registra **qué boletos de qué talonario se vendieron**, para poder
+cuadrar con cada vendedora.
+
+### El modelo de negocio (confirmado con Javier, no reinterpretarlo)
+
+- **Ticket** = ingreso al concierto, vale las **tres noches**, se perfora por día.
+  Por eso el estudiante **no lleva boletos**.
+- **Boleto** = ingreso a la feria, uno por día. Solo administrativos y docentes
+  reciben ticket + 3 boletos (ver §8.2).
+- **Talonario** = bloque correlativo de boletos que se **venden** al público.
+
+**Cada tipo lleva su propia numeración y todos arrancan en 1**: el boleto 250 del
+`EVENTO_1` y el 250 del `COMBO` son distintos. Lo identifica `(talonario, numero)`,
+**nunca el número solo** — por eso tiene tabla propia (`boleto_talonario`) y no se
+mezcla con `boleto`, que tiene `UNIQUE(codigo)` y no admitiría cuatro veces el 250.
+
+El **combo** es **un solo boleto** que habilita los tres días, no tres boletos. Vive
+en `TipoTalonario` y **no** en `DiaFeria`: metido ahí rompería la validación de día.
+
+### Reglas
+
+- **Sin solapes dentro del mismo tipo.** Dos talonarios de `EVENTO_1` con 1-200 y
+  150-350 dejarían 51 boletos en dos talonarios y el cuadre no cerraría nunca.
+  Entre tipos distintos el solape es normal y está permitido.
+- **Un ANULADO no revive con una marca masiva.** "Vendidos hasta el 137" pasa por
+  encima de los anulados sin tocarlos y avisa; solo se los corrige nombrándolos
+  **explícitamente** en la lista de números.
+- **`vendidoPor` y `fechaVenta` son campos propios, no la auditoría.**
+  `_modificacion_id_usuario` es `@LastModifiedBy` y lo pisa cualquier update posterior.
+- **Aislamiento:** una vendedora solo ve y marca los talonarios asignados a ella
+  (`listar?soloMios=true` + verificación en el service). El ADMINISTRADOR ve todos.
+- El precio es **opcional** y va en **bolivianos (Bs)**.
+
+### Endpoints — `/api/talonarios` (ADMINISTRADOR + VENTA_FERIA)
+
+- `GET /listar?tipo=&soloMios=` · `GET /obtener?idTalonario=` · `GET /boletos?idTalonario=`
+- `POST /crear` · `POST /generar` (varios correlativos de un tipo, sin huecos) —
+  **solo ADMINISTRADOR**
+- `PUT /actualizar?idTalonario=` — nombre, precio y vendedora. **El tipo y el rango
+  no se editan**: ya generaron sus boletos.
+- `DELETE /eliminar?idTalonario=` — rechaza si ya hay ventas.
+- `PATCH /marcar` — `hastaNumero` (rendición al cierre), `desde`+`hasta`, o `numeros`
+  sueltos. Se pueden combinar.
+
+Pantallas: **`/talonarios`** (admin) y **`/mis-talonarios`** (vendedora, pensada para
+el celular: buscador arriba, marcado abajo, grilla con toques de 44 px).
+
+> Generar boletos NO es un problema de rendimiento: medido, **10.000 filas en 214 ms**.
+> El OOM/timeout que hay documentado en §2 es de armar PDFs con miles de imágenes,
+> no de insertar filas.
+
+### Personas: de dónde viene cada una
+
+`GET /api/personas/listar` devuelve `tipo` (`ESTUDIANTE` / `ADMINISTRATIVO` /
+`DOCENTE` / `USUARIO` / `SIN_VINCULO`), para filtrarlas en la pantalla. Se resuelve
+con **4 consultas de ids** y no una por persona: con 8200 registros la lista responde
+en ~0.1 s; preguntando de a una sería inusable.
+
+---
+
+## 8.4 Editor del mapa 3D (Pulso FEXPO)
+
+La pantalla `/pulso-fexpo` se puede **reacomodar desde la interfaz**: mover bloques e
+ingresos, agregarlos, eliminarlos y cambiarles título, color, tamaño y transparencia.
+Antes las posiciones estaban escritas en el código (`ZONAS_BASE`) y había que editar
+números y recompilar.
+
+### Dónde se guarda
+
+En la **base de datos**, tabla `mapa_pulso`, **una sola fila** (`nombre='principal'`)
+con todo el acomodo en un **JSON**. No usa `localStorage`: el Pulso se proyecta en
+una pantalla pública, muchas veces desde otra máquina, así que el acomodo tiene que
+verse igual para todos.
+
+Se guarda como un documento y no como una tabla por zona porque el mapa se edita y se
+graba **entero**; una fila por zona pediría altas, bajas y sincronización por zona
+para algo que siempre se escribe completo.
+
+- `GET /api/mapa-pulso` (ADMINISTRADOR + CONTROL_FERIA) — `personalizado:false` = nunca
+  se editó, la pantalla usa el acomodo del código.
+- `PUT /api/mapa-pulso` · `DELETE /api/mapa-pulso` (solo ADMINISTRADOR). El DELETE
+  borra la fila: el mapa vuelve al original de fábrica.
+
+> ⚠️ **Ese acomodo es trabajo manual de horas.** Antes de tocar el formato o de probar
+> sobre esa pantalla, respaldarlo (`GET` a un archivo) y **nunca** hacerle `DELETE`.
+> Al probar la edición, no apretar "Guardar".
+
+### Versiones del documento
+
+| Versión | Qué guarda |
+|---|---|
+| 1 | Solo la posición de las zonas del código |
+| 2 | La definición completa de cada zona (permite agregar y quitar bloques) |
+| 3 | Suma los **ingresos** y la **opacidad** |
+
+`aplicarAcomodo()` soporta las tres: un acomodo v1 o v2 sigue cargando. **Al sumar
+campos nuevos hay que mantener esa compatibilidad**, o el mapa acomodado se pierde.
+
+### Trampas de la escena 3D
+
+- **Cada zona e ingreso vive en un `THREE.Group`.** Mover el grupo mueve el cuerpo,
+  las aristas, el título y la huella juntos. Antes estaban sueltos en la escena.
+- **La huella del piso NO se pinta en la textura del suelo.** Se hacía así, y al mover
+  un bloque quedaba pintada en la posición vieja como una **sombra**. Regla general:
+  lo que se hornea en una textura no se puede mover después.
+- **El título y el color están horneados en la textura del rótulo**, así que
+  renombrar o recolorear obliga a **rehacer la malla**, igual que cambiar el tamaño.
+- **Los pulsos y el enjambre salen de `gatesRender`, no de `GATES`**: los ingresos se
+  mueven, y si se usa el arreglo original salen del lugar viejo.
+- Posiciones topeadas a 0-100: sin eso un bloque se arrastra fuera del recinto y queda
+  flotando en el vacío sin forma evidente de recuperarlo.
+
+### Candado del arrastre
+
+Dentro del modo edición hay un botón que arranca **bloqueado**: se puede girar y
+acercar sin que un toque mueva algo por accidente. Con el candado cerrado un **clic
+corto** (menos de 5 px) igual **selecciona** el bloque para editarlo por los campos;
+un gesto largo gira la cámara.
 
 ---
 
