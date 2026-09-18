@@ -11,11 +11,15 @@ import com.uap.control_tickets.models.repository.HuellaDigitalDao;
 import com.uap.control_tickets.models.repository.SincronizacionHuellaDao;
 import com.uap.control_tickets.models.repository.SincronizacionHuellaDetalleDao;
 import com.uap.control_tickets.services.biometrico.UsuarioBiometrico;
+import com.uap.control_tickets.services.biometrico.UsuarioCarga;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -38,6 +42,35 @@ public class HuellaUsuarioProcesador {
 
     /** Lo que salió con un usuario, para sumar al contador del job. */
     public record ResultadoParcial(EstadoHuellaDetalle estado, String mensaje) {
+    }
+
+    /**
+     * Anota UNA línea del reporte de SUBIDA (el equipo ya hizo el trabajo;
+     * acá solo se guarda el detalle). Transacción propia y chica.
+     */
+    @Transactional
+    public void anotar(Long jobId, String equipo, String ru, EstadoHuellaDetalle estado, String mensaje) {
+        SincronizacionHuella job = jobDao.findById(jobId).orElseThrow();
+        guardarDetalle(job, equipo, ru, estado, mensaje);
+    }
+
+    /**
+     * Arma la carga sistema → equipo: RU + nombre + templates guardados.
+     * Lee en una sola transacción (las Personas son LAZY).
+     */
+    @Transactional(readOnly = true)
+    public List<UsuarioCarga> datosParaCarga(List<Long> idsEstudiantes) {
+        List<UsuarioCarga> lista = new ArrayList<>();
+        for (Long id : idsEstudiantes) {
+            var est = estudianteDao.findById(id).orElse(null);
+            if (est == null || est.getEstado() != EstadoRegistro.ACTIVO) continue;
+            Map<Integer, String> tpls = new LinkedHashMap<>();
+            for (var h : huellaDao.findAllByEstudianteIdEstudianteAndEstado(id, EstadoRegistro.ACTIVO)) {
+                tpls.put(h.getDedo(), h.getTemplate());
+            }
+            lista.add(new UsuarioCarga(est.getRu(), est.getPersona().getNombreCompleto(), tpls));
+        }
+        return lista;
     }
 
     /**

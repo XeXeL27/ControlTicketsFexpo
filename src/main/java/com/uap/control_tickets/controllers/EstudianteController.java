@@ -73,4 +73,18 @@ public class EstudianteController {
         estudianteService.eliminar(idEstudiante);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/facultades")
+    @Operation(summary = "Facultades distintas (para la carga masiva al biométrico)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<List<String>> facultades() {
+        return ResponseEntity.ok(estudianteService.facultades());
+    }
+
+    @GetMapping("/carreras")
+    @Operation(summary = "Carreras distintas (para la carga masiva al biométrico)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<List<String>> carreras() {
+        return ResponseEntity.ok(estudianteService.carreras());
+    }
 }

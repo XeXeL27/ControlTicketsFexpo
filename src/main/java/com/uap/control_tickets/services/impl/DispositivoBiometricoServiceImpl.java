@@ -9,11 +9,9 @@ import com.uap.control_tickets.models.entity.DispositivoBiometrico;
 import com.uap.control_tickets.models.repository.DispositivoBiometricoDao;
 import com.uap.control_tickets.services.biometrico.BiometriaException;
 import com.uap.control_tickets.services.biometrico.BiometricoDriver;
-import com.uap.control_tickets.services.biometrico.SimulacionBiometricoDriver;
-import com.uap.control_tickets.services.biometrico.ZktecoTcpDriver;
+import com.uap.control_tickets.services.biometrico.BiometricoDriverSelector;
 import com.uap.control_tickets.services.interfaces.DispositivoBiometricoService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,22 +21,18 @@ import java.util.Map;
 /**
  * ABM de biométricos + prueba de conexión.
  *
- * El driver se elige con {@code app.biometria.simulacion}: en true se usa el
- * simulado (para probar sin equipo); en false el TCP real.
+ * El driver lo elige {@link BiometricoDriverSelector} (simulación, python/pyzk
+ * o java TCP) según las properties {@code app.biometria.*}.
  */
 @Service
 @RequiredArgsConstructor
 public class DispositivoBiometricoServiceImpl implements DispositivoBiometricoService {
 
     private final DispositivoBiometricoDao dispositivoDao;
-    private final ZktecoTcpDriver driverReal;
-    private final SimulacionBiometricoDriver driverSimulado;
-
-    @Value("${app.biometria.simulacion:false}")
-    private boolean simulacion;
+    private final BiometricoDriverSelector selector;
 
     private BiometricoDriver driver() {
-        return simulacion ? driverSimulado : driverReal;
+        return selector.actual();
     }
 
     @Override
@@ -104,6 +98,17 @@ public class DispositivoBiometricoServiceImpl implements DispositivoBiometricoSe
         d.setPuerto(dto.getPuerto() == null ? 4370 : dto.getPuerto());
         d.setTimeoutMs(dto.getTimeoutMs() == null ? 8000 : dto.getTimeoutMs());
         d.setActivo(dto.getActivo() == null || dto.getActivo());
+        // Clave: en blanco al editar conserva la guardada (al crear queda sin clave).
+        if (dto.getClaveComunicacion() != null && !dto.getClaveComunicacion().isBlank()) {
+            String clave = dto.getClaveComunicacion().trim();
+            if (!clave.chars().allMatch(Character::isDigit)) {
+                throw new NegocioException("La clave de comunicación debe ser solo dígitos");
+            }
+            if (clave.length() > 10) {
+                throw new NegocioException("La clave de comunicación es muy larga (máx. 10 dígitos)");
+            }
+            d.setClaveComunicacion(clave);
+        }
     }
 
     private DispositivoBiometrico buscarActivo(Long id) {
@@ -120,6 +125,7 @@ public class DispositivoBiometricoServiceImpl implements DispositivoBiometricoSe
         dto.setPuerto(d.getPuerto());
         dto.setTimeoutMs(d.getTimeoutMs());
         dto.setActivo(d.getActivo());
+        dto.setTieneClave(d.getClaveComunicacion() != null && !d.getClaveComunicacion().isBlank());
         dto.setEstado(d.getEstado().name());
         return dto;
     }

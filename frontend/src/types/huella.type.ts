@@ -7,6 +7,8 @@ export interface DispositivoBiometricoDetalleDto {
   puerto: number
   timeoutMs: number
   activo: boolean
+  /** true si tiene clave de comunicación cargada (la clave nunca sale). */
+  tieneClave?: boolean | null
   estado: string
 }
 
@@ -16,6 +18,8 @@ export interface DispositivoBiometricoDto {
   puerto: number
   timeoutMs: number
   activo: boolean
+  /** Clave numérica del equipo (opcional). Al editar, en blanco conserva la guardada. */
+  claveComunicacion?: string | null
 }
 
 /** Lo que publica el WS /topic/huellas/{jobId} y devuelve GET /huellas/progreso. */
@@ -23,6 +27,10 @@ export interface ProgresoHuellaDto {
   jobId: number
   /** EN_CURSO, FINALIZADO, ERROR, CANCELADO. */
   estado: string
+  /** BAJADA (equipo→sistema) o SUBIDA (carga masiva al equipo). */
+  direccion?: string | null
+  /** Etiqueta del alcance ("Portería, Bloque A" o "Carga carrera X → Portería"). */
+  equipos?: string | null
   total: number
   procesados: number
   porcentaje: number
@@ -39,7 +47,7 @@ export interface ProgresoHuellaDto {
 export interface DetalleHuellaDto {
   ru: string
   equipo?: string | null
-  /** CORRECTO, DUPLICADO, NO_ENCONTRADO, SIN_HUELLA, ERROR. */
+  /** CORRECTO, DUPLICADO, NO_ENCONTRADO, SIN_HUELLA, CARGADO, ACTUALIZADO, ERROR. */
   estado: string
   mensaje?: string | null
 }
@@ -48,6 +56,8 @@ export interface ResultadoHuellaDto {
 
   jobId: number
   estado: string
+  /** BAJADA (equipo→sistema) o SUBIDA (carga masiva al equipo). */
+  direccion?: string | null
   equipos?: string | null
   total: number
   correctos: number
@@ -70,4 +80,12 @@ export interface HuellaDigitalDto {
   versionBiometrica?: string | null
   fechaCaptura?: string | null
   tamanoBytes?: number | null
+}
+
+/** Pide cargar al equipo una facultad o carrera entera. */
+export interface CargaMasivaDto {
+  idDispositivo: number
+  /** FACULTAD o CARRERA. */
+  campo: string
+  valor: string
 }

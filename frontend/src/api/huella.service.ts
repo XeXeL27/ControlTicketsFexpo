@@ -1,6 +1,7 @@
 // Capa de API de biométricos + sincronización de huellas.
 import http from '@/api/http'
 import type {
+  CargaMasivaDto,
   DispositivoBiometricoDetalleDto,
   DispositivoBiometricoDto,
   HuellaDigitalDto,
@@ -58,6 +59,11 @@ export function historialSincronizaciones() {
 
 export function cancelarSincronizacion(jobId: number) {
   return http.post('/huellas/cancelar', null, { params: { jobId } })
+}
+
+/** Carga masiva sistema→equipo (devuelve el jobId para seguir el progreso). */
+export function iniciarCarga(dto: CargaMasivaDto) {
+  return http.post<{ jobId: number }>('/huellas/cargar', dto).then((r) => r.data.jobId)
 }
 
 /** Las N huellas guardadas de un estudiante (dedo, equipo, fecha). */

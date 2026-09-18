@@ -80,6 +80,17 @@ public class SimulacionBiometricoDriver implements BiometricoDriver {
         return usuarios;
     }
 
+    @Override
+    public void cargarUsuarios(DispositivoBiometrico d, List<UsuarioCarga> usuarios, ProgresoCarga progreso) {
+        // Finge la subida línea por línea para probar barra + reporte sin equipo.
+        for (UsuarioCarga u : usuarios) {
+            esperar(150);
+            int n = u.templates().size();
+            progreso.linea(new LineaCarga(u.ru(), "CARGADO",
+                    "creado con " + n + " huella(s)" + (n == 0 ? " (sin huellas en el sistema)" : "")));
+        }
+    }
+
     private static String templateFalso(DispositivoBiometrico d, String semilla) {
         byte[] relleno = new byte[512];
         byte[] s = (d.getIp() + "|" + semilla).getBytes(java.nio.charset.StandardCharsets.UTF_8);

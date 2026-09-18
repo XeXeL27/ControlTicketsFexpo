@@ -25,4 +25,10 @@ public class DispositivoBiometricoDto {
     private Integer timeoutMs = 8000;
 
     private Boolean activo = true;
+
+    /**
+     * Clave de comunicación del equipo (solo dígitos). Opcional: vacío = sin
+     * clave. Al editar, vacío conserva la guardada (nunca se devuelve al front).
+     */
+    private String claveComunicacion;
 }

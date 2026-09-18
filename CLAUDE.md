@@ -204,13 +204,31 @@ Hecho:
 - **Módulo HUELLAS (biométricos ZKTeco) listo**: traer los templates de huella
   de uno o varios equipos y marcar al estudiante como "con huella".
   - El **PIN del equipo es el RU**: se cruza con `EstudianteDao.findByRu`.
-  - **Driver Java puro por TCP 4370** (`services/biometrico/ZktecoTcpDriver`:
-    cabecera 8 bytes LE + checksum, CONNECT → DISABLE → tabla de usuarios →
-    template por dedo → ENABLE → EXIT), sin DLL (el servidor es Linux).
-    Los códigos de comando están como constantes arriba del driver; la lectura
-    de template prueba SSR (`CMD_DB_RRQ`) y después clásico
-    (`CMD_USERTEMP_RRQ`). El PIN se extrae como "el string de dígitos" del
-    registro (el RU siempre es numérico), así no depende del offset del firmware.
+  - **Intermediario Python (pyzk)**: por defecto el backend NO habla directo al
+    equipo, sino que ejecuta scripts Python (`src/main/resources/biometria/`:
+    `zk_probar.py`, `zk_descargar.py`) que usan la librería **pyzk** y devuelven
+    JSON por stdout. `PythonZktecoDriver` los corre con `ProcessBuilder`
+    (timeout = timeout del equipo + 120 s), traduce los errores a castellano y
+    elige el ejecutable con `app.biometria.python` (default `python3`, con
+    fallback automático a `python`). Los scripts viajan dentro del jar
+    (`BiometriaScripts` los extrae a un temporal al arrancar). Requisito del
+    servidor: **Python 3 + `pip install pyzk`**.
+  - `app.biometria.driver`: `python` (default) o `java` (el `ZktecoTcpDriver`
+    propio queda como respaldo: frame TCP `0x5050, 0x7D82, largo` + cabecera LE
+    + checksum, CONNECT → AUTH(`make_commkey`) → DISABLE → bloques → ENABLE →
+    EXIT). `BiometricoDriverSelector` elige (simulación primero).
+  - **Clave de comunicación**: `DispositivoBiometrico.claveComunicacion` (solo
+    dígitos, opcional; en blanco al editar conserva la guardada y nunca sale
+    al front, solo `tieneClave`). Si el CONNECT vuelve `UNAUTH` se manda
+    `CMD_AUTH` con `make_commkey(clave, sesion)` (ticks=50); sin clave cargada
+    el error lo dice, y con clave mala avisa "contraseña incorrecta".
+  - Lecturas en bloque (una descarga por equipo, no una por dedo): usuarios con
+    `CMD_USERTEMP_RRQ + int(5)` (registro exacto de 72 bytes
+    `uid:u16, priv, pass:8, nombre:24, card:u32, x, grupo:7, x, pin:24`; el PIN
+    son los últimos 24 bytes; si el tamaño difiere hay respaldo heurístico por
+    "string de dígitos") y templates con `CMD_DB_RRQ + int(2)`
+    (`[tam:u16, uid:u16, dedo:s8, valido:s8, template…]`), con respaldo por
+    comando no documentado 88 (uid:i16 + dedo:i8) si el bloque no anda.
   - **Modo simulación** (`app.biometria.simulacion`, default `false` en el
     properties base): `SimulacionBiometricoDriver` devuelve 4 usuarios
     inventados (RU 1001 con huella, 1002 sin huella, 9999 inexistente, 1001
@@ -506,6 +524,10 @@ Claves importantes del perfil `jarv`:
   secretos; lo correcto sería moverlas al properties local o a variables de entorno.
 - `app.biometria.simulacion` (base, default `false`): en `true` el módulo de huellas
   usa datos inventados en vez de la red, para probar barra + reporte sin equipo.
+- `app.biometria.driver` (base, default `python`) + `app.biometria.python`
+  (default `python3`): intermediario pyzk. En el servidor hace falta Python 3 con
+  `pip install pyzk`; en Windows el ejecutable suele llamarse `python` (hay
+  fallback automático).
 
 ---
 
@@ -593,6 +615,13 @@ previa de las pantallas de estudiantes y administrativos.
 **Huellas / sincronización** (ADMINISTRADOR) — `/api/huellas`
 - `POST /sincronizar` — body opcional: lista de ids de equipos (vacío = todos los
   activos). Crea el job y lo lanza en 2º plano; devuelve `{jobId}` enseguida.
+- `POST /cargar` — **carga masiva sistema→equipo**: body `{idDispositivo,
+  campo: FACULTAD|CARRERA, valor}`. Crea/actualiza en UN equipo a los
+  estudiantes del grupo **que tengan huella** (los demás se ignoran; PIN = RU).
+  Intermediario `zk_cargar.py` (pyzk `set_user` + `save_user_template`) que
+  avisa un RU por vez para la barra en vivo. Requiere driver python.
+- `GET /estudiantes/facultades` · `GET /estudiantes/carreras` — valores
+  distintos (alimentan los desplegables de la carga).
 - `GET /progreso?jobId=` — `{estado, total, procesados, porcentaje, correctos,
   duplicados, noEncontrados, sinHuella, errores, ruActual, equipoActual}` (polling).
 - WS **`/topic/huellas/{jobId}`** — mismo progreso en vivo por STOMP (igual patrón
@@ -734,13 +763,13 @@ HuellaDigital (templates descargados del equipo)
 
 SincronizacionHuella (job de sincronización)
   idSincronizacion (PK) · estadoJob (EN_CURSO/FINALIZADO/ERROR/CANCELADO)
+  · direccion (BAJADA = equipo→sistema, SUBIDA = carga masiva al equipo)
   · totalUsuarios · procesados · correctos/duplicados/noEncontrados/sinHuella/errores
   · equipos · mensajeError · fechaFin
   + auditoría / estado
-
 SincronizacionHuellaDetalle (una fila por RU del reporte final)
   idDetalle (PK) · sincronizacion (FK) · ru · equipo
-  · resultado (CORRECTO/DUPLICADO/NO_ENCONTRADO/SIN_HUELLA/ERROR) · mensaje
+  · resultado (CORRECTO/DUPLICADO/NO_ENCONTRADO/SIN_HUELLA/CARGADO/ACTUALIZADO/ERROR) · mensaje
   + auditoría / estado (nunca se borra: es el historial)
 ```
 El campo `dentro` en Ticket permite responder rápido "¿quién está adentro?"; el

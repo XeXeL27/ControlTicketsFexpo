@@ -29,3 +29,12 @@ export function previsualizarCsv(archivo: File) {
     .post<PrevisualizacionCsvDto>('/estudiantes/previsualizar', fd)
     .then((r) => r.data)
 }
+
+/** Facultades y carreras distintas (para la carga masiva al biométrico). */
+export function listarFacultades() {
+  return http.get<string[]>('/estudiantes/facultades').then((r) => r.data)
+}
+
+export function listarCarreras() {
+  return http.get<string[]>('/estudiantes/carreras').then((r) => r.data)
+}

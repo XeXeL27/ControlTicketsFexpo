@@ -18,6 +18,8 @@ public class ResultadoHuellaDto {
 
     private Long jobId;
     private String estado;
+    /** BAJADA (equipo→sistema) o SUBIDA (carga masiva al equipo). */
+    private String direccion;
     private String equipos;
     private int total;
     private int correctos;

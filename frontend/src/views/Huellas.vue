@@ -19,14 +19,17 @@ import {
   crearBiometrico,
   eliminarBiometrico,
   historialSincronizaciones,
+  iniciarCarga,
   iniciarSincronizacion,
   listarBiometricos,
   probarConexionBiometrico,
   progresoSincronizacion,
   resultadoSincronizacion,
 } from '@/api/huella.service'
+import { listarCarreras, listarFacultades } from '@/api/estudiante.service'
 import { conectarHuellasWs } from '@/api/ws-huellas'
 import type {
+  CargaMasivaDto,
   DispositivoBiometricoDetalleDto,
   DispositivoBiometricoDto,
   ProgresoHuellaDto,
@@ -57,11 +60,23 @@ const columnasEquipos: ColumnaTabla[] = [
 // --- Sincronización ---
 const seleccionados = ref<number[]>([])
 const sincronizando = ref(false)
+// true mientras se arma el job en el servidor (el POST tarda con muchos
+// estudiantes); ahí se muestra un aviso "esperá" hasta que arranca la barra.
+const preparando = ref(false)
 const jobId = ref<number | null>(null)
 const progreso = ref<ProgresoHuellaDto | null>(null)
 const wsConectado = ref(false)
 let cerrarWs: (() => void) | null = null
 let intervaloPoll: number | undefined
+
+// --- Carga masiva sistema→equipo ---
+const cargaEquipoId = ref<number | null>(null)
+const cargaCampo = ref('FACULTAD')
+const cargaValor = ref('')
+const facultades = ref<string[]>([])
+const carreras = ref<string[]>([])
+
+const valoresCarga = computed(() => (cargaCampo.value === 'FACULTAD' ? facultades.value : carreras.value))
 
 // --- Resultado e historial ---
 const resultado = ref<ResultadoHuellaDto | null>(null)
@@ -85,7 +100,7 @@ const detallesFiltrados = computed(() => {
 
 const subtituloProgreso = computed(() => {
   if (!progreso.value) return ''
-  if (!progreso.value.total) return 'Conectando a los equipos…'
+  if (!progreso.value.total) return 'Conectando al equipo…'
   const partes = []
   if (progreso.value.equipoActual) partes.push(progreso.value.equipoActual)
   if (progreso.value.ruActual) partes.push(`RU ${progreso.value.ruActual}`)
@@ -93,8 +108,17 @@ const subtituloProgreso = computed(() => {
   return partes.join(' · ')
 })
 
+const tituloProgreso = computed(() =>
+  progreso.value?.direccion === 'SUBIDA' ? 'Cargando al equipo' : 'Sincronizando huellas',
+)
+
+function conteo(estado: string): number {
+  if (!resultado.value) return 0
+  return resultado.value.detalles.filter((d) => d.estado === estado).length
+}
+
 function formVacio(): DispositivoBiometricoDto {
-  return { nombre: '', ip: '', puerto: 4370, timeoutMs: 8000, activo: true }
+  return { nombre: '', ip: '', puerto: 4370, timeoutMs: 8000, activo: true, claveComunicacion: '' }
 }
 
 async function cargarEquipos() {
@@ -118,6 +142,15 @@ async function cargarHistorial() {
   }
 }
 
+async function cargarListas() {
+  try {
+    facultades.value = await listarFacultades()
+  } catch { facultades.value = [] }
+  try {
+    carreras.value = await listarCarreras()
+  } catch { carreras.value = [] }
+}
+
 // --- ABM equipos ---
 function nuevo() {
   editandoId.value = null
@@ -128,7 +161,8 @@ function nuevo() {
 
 function editar(eq: DispositivoBiometricoDetalleDto) {
   editandoId.value = eq.idDispositivo
-  form.value = { nombre: eq.nombre, ip: eq.ip, puerto: eq.puerto, timeoutMs: eq.timeoutMs, activo: eq.activo }
+  // La clave no se muestra: en blanco conserva la guardada.
+  form.value = { nombre: eq.nombre, ip: eq.ip, puerto: eq.puerto, timeoutMs: eq.timeoutMs, activo: eq.activo, claveComunicacion: '' }
   errorForm.value = ''
   mostrarModalEquipo.value = true
 }
@@ -171,7 +205,17 @@ async function probar(eq: DispositivoBiometricoDetalleDto) {
   }
 }
 
-// --- Sincronización ---
+// --- Sincronización (bajada) y carga masiva (subida): mismo seguimiento ---
+function arrancarSeguimiento(id: number) {
+  jobId.value = id
+  sincronizando.value = true
+  // En vivo por WS + polling de respaldo cada 2s.
+  cerrarWs?.()
+  cerrarWs = conectarHuellasWs(id, alProgreso, (ok) => { wsConectado.value = ok })
+  window.clearInterval(intervaloPoll)
+  intervaloPoll = window.setInterval(poll, 2000)
+}
+
 async function sincronizar() {
   if (!seleccionados.value.length) {
     alertas.error('Elegí al menos un equipo')
@@ -179,17 +223,40 @@ async function sincronizar() {
   }
   resultado.value = null
   progreso.value = null
+  preparando.value = true
   try {
-    const id = await iniciarSincronizacion(seleccionados.value)
-    jobId.value = id
-    sincronizando.value = true
-    // En vivo por WS + polling de respaldo cada 2s.
-    cerrarWs?.()
-    cerrarWs = conectarHuellasWs(id, alProgreso, (ok) => { wsConectado.value = ok })
-    window.clearInterval(intervaloPoll)
-    intervaloPoll = window.setInterval(poll, 2000)
+    arrancarSeguimiento(await iniciarSincronizacion(seleccionados.value))
   } catch (e) {
     alertas.error(mensajeError(e, 'No se pudo iniciar la sincronización'))
+  } finally {
+    preparando.value = false
+  }
+}
+
+async function cargar() {
+  if (cargaEquipoId.value == null) {
+    alertas.error('Elegí el equipo destino')
+    return
+  }
+  if (!cargaValor.value) {
+    alertas.error('Elegí la facultad o carrera a cargar')
+    return
+  }
+  const dto: CargaMasivaDto = {
+    idDispositivo: cargaEquipoId.value,
+    campo: cargaCampo.value,
+    valor: cargaValor.value,
+  }
+  if (!(await confirmar({ titulo: 'Carga masiva', mensaje: `Se crean/actualizan en el equipo los estudiantes de ${cargaValor.value} que tengan huella (PIN = RU). Los sin huella se ignoran. ¿Seguir?` }))) return
+  resultado.value = null
+  progreso.value = null
+  preparando.value = true
+  try {
+    arrancarSeguimiento(await iniciarCarga(dto))
+  } catch (e) {
+    alertas.error(mensajeError(e, 'No se pudo iniciar la carga'))
+  } finally {
+    preparando.value = false
   }
 }
 
@@ -246,7 +313,10 @@ async function verJob(id: number) {
 
 function claseEstado(estado: string): string {
   switch (estado) {
-    case 'CORRECTO': return 'chip ok'
+    case 'CORRECTO':
+    case 'CARGADO':
+    case 'ACTUALIZADO':
+      return 'chip ok'
     case 'DUPLICADO': return 'chip av'
     case 'NO_ENCONTRADO': return 'chip er'
     case 'SIN_HUELLA': return 'chip'
@@ -257,6 +327,7 @@ function claseEstado(estado: string): string {
 onMounted(() => {
   void cargarEquipos()
   void cargarHistorial()
+  void cargarListas()
 })
 
 onUnmounted(() => {
@@ -285,6 +356,10 @@ onUnmounted(() => {
     >
       <template #herramientas>
         <button @click="nuevo">Nuevo equipo</button>
+      </template>
+      <template #col-nombre="{ fila, valor }">
+        {{ valor }}
+        <span v-if="fila.tieneClave" class="chip" title="Tiene clave de comunicación cargada">con clave</span>
       </template>
       <template #col-activo="{ valor }">
         <span v-if="valor" class="chip ok">Sí</span>
@@ -331,8 +406,8 @@ onUnmounted(() => {
         </div>
         <div class="fila" style="gap:8px">
           <button v-if="sincronizando" class="peligro" @click="cancelar">Cancelar</button>
-          <button :disabled="sincronizando || !seleccionados.length" @click="sincronizar">
-            {{ sincronizando ? 'Sincronizando…' : `Sincronizar (${seleccionados.length})` }}
+          <button :disabled="sincronizando || preparando || !seleccionados.length" @click="sincronizar">
+            {{ preparando && !sincronizando ? 'Preparando…' : sincronizando ? 'Sincronizando…' : `Sincronizar (${seleccionados.length})` }}
           </button>
         </div>
       </div>
@@ -341,16 +416,55 @@ onUnmounted(() => {
       </Alerta>
     </div>
 
+    <!-- Carga masiva sistema→equipo -->
+    <div class="card" style="margin:16px 0">
+      <div class="fila" style="justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div>
+          <strong>Carga masiva al equipo</strong>
+          <p class="ayuda" style="margin:6px 0 0">
+            Crea/actualiza en UN equipo a los estudiantes de una facultad o
+            carrera que <strong>tengan huella</strong> (PIN = R.U., con sus huellas
+            guardadas). Los que no tienen huella se ignoran por completo. La barra
+            avanza por cada R.U. y al final sale el detalle usuario por usuario.
+          </p>
+          <div class="fila" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+            <select v-model="cargaEquipoId" style="max-width:240px" :disabled="sincronizando">
+              <option :value="null">Equipo destino…</option>
+              <option v-for="eq in equiposActivos" :key="eq.idDispositivo" :value="eq.idDispositivo">
+                {{ eq.nombre }} ({{ eq.ip }})
+              </option>
+            </select>
+            <select v-model="cargaCampo" style="max-width:150px" :disabled="sincronizando" @change="cargaValor = ''">
+              <option value="FACULTAD">Facultad</option>
+              <option value="CARRERA">Carrera</option>
+            </select>
+            <select v-model="cargaValor" style="max-width:260px" :disabled="sincronizando">
+              <option value="">Elegir… ({{ valoresCarga.length }})</option>
+              <option v-for="v in valoresCarga" :key="v" :value="v">{{ v }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="fila" style="gap:8px">
+          <button v-if="sincronizando" class="peligro" @click="cancelar">Cancelar</button>
+          <button :disabled="sincronizando || preparando || cargaEquipoId == null || !cargaValor" @click="cargar">
+            {{ preparando && !sincronizando ? 'Preparando…' : sincronizando ? 'Cargando…' : 'Cargar al equipo' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Resultado -->
     <div v-if="resultado" class="card" style="margin-bottom:16px">
       <strong>Resultado #{{ resultado.jobId }}</strong>
+      <span v-if="resultado.direccion" class="chip" style="margin-left:6px">{{
+        resultado.direccion === 'SUBIDA' ? 'carga al equipo' : 'descarga del equipo' }}</span>
       <span class="ayuda"> · {{ resultado.equipos }} · {{ resultado.estado }}</span>
       <div class="tarjetas">
-        <div class="dato"><span class="numero">{{ resultado.total }}</span><span class="etiqueta">Leídos</span></div>
-        <div class="dato"><span class="numero">{{ resultado.correctos }}</span><span class="etiqueta">Correctos</span></div>
-        <div class="dato"><span class="numero">{{ resultado.duplicados }}</span><span class="etiqueta">Duplicados</span></div>
-        <div class="dato"><span class="numero">{{ resultado.noEncontrados }}</span><span class="etiqueta">No registrados</span></div>
-        <div class="dato"><span class="numero">{{ resultado.sinHuella }}</span><span class="etiqueta">Sin huella</span></div>
+        <div class="dato"><span class="numero">{{ resultado.total }}</span><span class="etiqueta">Total</span></div>
+        <div class="dato"><span class="numero">{{ resultado.correctos }}</span><span class="etiqueta">{{ resultado.direccion === 'SUBIDA' ? 'Cargados' : 'Correctos' }}</span></div>
+        <div v-if="resultado.direccion !== 'SUBIDA'" class="dato"><span class="numero">{{ resultado.duplicados }}</span><span class="etiqueta">Duplicados</span></div>
+        <div v-if="resultado.direccion !== 'SUBIDA'" class="dato"><span class="numero">{{ resultado.noEncontrados }}</span><span class="etiqueta">No registrados</span></div>
+        <div v-if="resultado.direccion !== 'SUBIDA'" class="dato"><span class="numero">{{ resultado.sinHuella }}</span><span class="etiqueta">Sin huella</span></div>
         <div v-if="resultado.errores" class="dato"><span class="numero">{{ resultado.errores }}</span><span class="etiqueta">Errores</span></div>
       </div>
       <TablaDatos
@@ -368,6 +482,8 @@ onUnmounted(() => {
             <option value="DUPLICADO">Duplicados ({{ resultado.duplicados }})</option>
             <option value="NO_ENCONTRADO">No registrados ({{ resultado.noEncontrados }})</option>
             <option value="SIN_HUELLA">Sin huella ({{ resultado.sinHuella }})</option>
+            <option v-if="conteo('CARGADO')" value="CARGADO">Cargados ({{ conteo('CARGADO') }})</option>
+            <option v-if="conteo('ACTUALIZADO')" value="ACTUALIZADO">Actualizados ({{ conteo('ACTUALIZADO') }})</option>
             <option v-if="resultado.errores" value="ERROR">Errores ({{ resultado.errores }})</option>
           </select>
         </template>
@@ -379,11 +495,12 @@ onUnmounted(() => {
     <div v-if="historial.length" class="card" style="margin-bottom:16px">
       <strong>Historial</strong>
       <table class="hist">
-        <thead><tr><th>#</th><th>Equipos</th><th>Estado</th><th>Avance</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Alcance</th><th>Dirección</th><th>Estado</th><th>Avance</th><th></th></tr></thead>
         <tbody>
           <tr v-for="h in historial" :key="h.jobId">
             <td>{{ h.jobId }}</td>
-            <td>{{ h.equipoActual || '—' }}</td>
+            <td>{{ h.equipos || h.equipoActual || '—' }}</td>
+            <td>{{ h.direccion === 'SUBIDA' ? 'subida' : 'bajada' }}</td>
             <td>{{ h.estado }}</td>
             <td>{{ h.procesados }}/{{ h.total }} (✓{{ h.correctos }} ⧉{{ h.duplicados }} ?{{ h.noEncontrados }})</td>
             <td><button class="secundario" @click="verJob(h.jobId)">Ver</button></td>
@@ -397,6 +514,10 @@ onUnmounted(() => {
       <form id="form-equipo" @submit.prevent="guardar">
         <label>Nombre *</label><input v-model="form.nombre" required placeholder="Portería" />
         <label>IP *</label><input v-model="form.ip" required placeholder="192.168.1.201" />
+        <label>Clave de comunicación</label>
+        <input v-model="form.claveComunicacion" inputmode="numeric" autocomplete="off"
+          placeholder="Solo dígitos (vacío = sin clave)" />
+        <p class="ayuda">La que se configura en el teclado del equipo. Al editar, dejar en blanco conserva la guardada.</p>
         <label>Puerto</label><input v-model.number="form.puerto" type="number" min="1" max="65535" />
         <label>Timeout (ms)</label><input v-model.number="form.timeoutMs" type="number" min="1000" step="500" />
         <label><input type="checkbox" v-model="form.activo" /> Activo (entra en la sincronización)</label>
@@ -411,10 +532,20 @@ onUnmounted(() => {
     <!-- Progreso en vivo -->
     <ProgresoModal
       v-if="progreso && sincronizando"
-      titulo="Sincronizando huellas"
+      :titulo="tituloProgreso"
       :actual="progreso.procesados"
       :total="progreso.total"
       :subtitulo="subtituloProgreso"
+    />
+
+    <!-- Aviso mientras se arma el job (el POST tarda con muchos estudiantes) -->
+    <ProgresoModal
+      v-if="preparando && !sincronizando"
+      titulo="Preparando…"
+      :actual="0"
+      :total="0"
+      indeterminado
+      subtitulo="Armando la lista de estudiantes, esperá un momento por favor."
     />
   </div>
 </template>

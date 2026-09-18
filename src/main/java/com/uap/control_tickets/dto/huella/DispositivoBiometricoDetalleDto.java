@@ -12,5 +12,7 @@ public class DispositivoBiometricoDetalleDto {
     private Integer puerto;
     private Integer timeoutMs;
     private Boolean activo;
+    /** true si tiene clave de comunicación cargada (la clave en sí nunca sale). */
+    private Boolean tieneClave;
     private String estado;
 }

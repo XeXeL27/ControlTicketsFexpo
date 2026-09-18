@@ -12,6 +12,10 @@ public class ProgresoHuellaDto {
     private Long jobId;
     /** EN_CURSO, FINALIZADO, ERROR, CANCELADO. */
     private String estado;
+    /** BAJADA (equipo→sistema) o SUBIDA (carga masiva al equipo). */
+    private String direccion;
+    /** Etiqueta del alcance ("Portería, Bloque A" o "Carga carrera X → Portería"). */
+    private String equipos;
     private int total;
     private int procesados;
     private int porcentaje;

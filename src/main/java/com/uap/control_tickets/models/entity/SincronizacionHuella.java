@@ -1,6 +1,7 @@
 package com.uap.control_tickets.models.entity;
 
 import com.uap.control_tickets.config.AuditoriaConfig;
+import com.uap.control_tickets.enums.DireccionSincronizacion;
 import com.uap.control_tickets.enums.EstadoSincronizacion;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -30,6 +31,11 @@ public class SincronizacionHuella extends AuditoriaConfig {
     @Enumerated(EnumType.STRING)
     @Column(name = "estado_job", nullable = false, length = 20)
     private EstadoSincronizacion estadoJob = EstadoSincronizacion.EN_CURSO;
+
+    /** BAJADA = equipo→sistema, SUBIDA = sistema→equipo (carga masiva). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "direccion", nullable = false, length = 10)
+    private DireccionSincronizacion direccion = DireccionSincronizacion.BAJADA;
 
     /** Total de usuarios (suma de los equipos) contra el que avanza la barra. */
     @Column(name = "total_usuarios", nullable = false)

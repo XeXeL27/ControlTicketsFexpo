@@ -1,11 +1,13 @@
 package com.uap.control_tickets.controllers;
 
+import com.uap.control_tickets.dto.huella.CargaMasivaDto;
 import com.uap.control_tickets.dto.huella.HuellaDigitalDto;
 import com.uap.control_tickets.dto.huella.ProgresoHuellaDto;
 import com.uap.control_tickets.dto.huella.ResultadoHuellaDto;
 import com.uap.control_tickets.services.interfaces.SincronizacionHuellaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -31,11 +33,20 @@ public class SincronizacionHuellaController {
     private final SincronizacionHuellaService sincronizacionService;
 
     @PostMapping("/sincronizar")
-    @Operation(summary = "Inicia la sincronización (devuelve el jobId enseguida)",
+    @Operation(summary = "Inicia la sincronización equipo→sistema (devuelve el jobId enseguida)",
             description = "Body opcional: lista de ids de equipos. Vacío = todos los activos.")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<Map<String, Long>> sincronizar(@RequestBody(required = false) List<Long> idsEquipos) {
         Long jobId = sincronizacionService.iniciar(idsEquipos);
+        return ResponseEntity.ok(Map.of("jobId", jobId));
+    }
+
+    @PostMapping("/cargar")
+    @Operation(summary = "Carga masiva sistema→equipo: una facultad/carrera a un biométrico",
+            description = "Crea/actualiza cada estudiante (PIN = RU) con sus huellas guardadas. Devuelve el jobId enseguida.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<Map<String, Long>> cargar(@Valid @RequestBody CargaMasivaDto dto) {
+        Long jobId = sincronizacionService.iniciarCarga(dto);
         return ResponseEntity.ok(Map.of("jobId", jobId));
     }
 

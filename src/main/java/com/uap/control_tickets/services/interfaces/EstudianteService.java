@@ -20,4 +20,9 @@ public interface EstudianteService {
 
     /** Lee el CSV y reporta que pasaria al importarlo, sin escribir en la base. */
     PrevisualizacionCsvDto previsualizarCsv(MultipartFile archivo);
+
+    /** Facultades y carreras distintas (para la carga masiva al biométrico). */
+    List<String> facultades();
+
+    List<String> carreras();
 }

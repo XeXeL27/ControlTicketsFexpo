@@ -142,6 +142,18 @@ public class EstudianteServiceImpl implements EstudianteService {
      */
     @Override
     @Transactional(readOnly = true)
+    public List<String> facultades() {
+        return estudianteDao.facultadesDistintas(EstadoRegistro.ACTIVO);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> carreras() {
+        return estudianteDao.carrerasDistintas(EstadoRegistro.ACTIVO);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PrevisualizacionCsvDto previsualizarCsv(MultipartFile archivo) {
         if (archivo == null || archivo.isEmpty()) {
             throw new NegocioException("El archivo CSV está vacío");

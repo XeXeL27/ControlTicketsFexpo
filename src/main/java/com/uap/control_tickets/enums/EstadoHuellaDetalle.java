@@ -11,11 +11,15 @@ package com.uap.control_tickets.enums;
  * NO_ENCONTRADO el PIN del equipo no es ningún RU registrado en el sistema.
  * SIN_HUELLA   el usuario existe en el equipo pero no tiene template enrolado.
  * ERROR        no se pudo leer/guardar ese usuario (mensaje en el detalle).
+ * CARGADO      (SUBIDA) el RU se creó en el equipo.
+ * ACTUALIZADO  (SUBIDA) el RU ya existía en el equipo y se actualizó.
  */
 public enum EstadoHuellaDetalle {
     CORRECTO,
     DUPLICADO,
     NO_ENCONTRADO,
     SIN_HUELLA,
-    ERROR
+    ERROR,
+    CARGADO,
+    ACTUALIZADO
 }

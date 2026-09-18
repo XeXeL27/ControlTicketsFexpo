@@ -1,8 +1,10 @@
 package com.uap.control_tickets.services.impl;
 
+import com.uap.control_tickets.dto.huella.CargaMasivaDto;
 import com.uap.control_tickets.dto.huella.HuellaDigitalDto;
 import com.uap.control_tickets.dto.huella.ProgresoHuellaDto;
 import com.uap.control_tickets.dto.huella.ResultadoHuellaDto;
+import com.uap.control_tickets.enums.DireccionSincronizacion;
 import com.uap.control_tickets.enums.EstadoHuellaDetalle;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.enums.EstadoSincronizacion;
@@ -17,15 +19,15 @@ import com.uap.control_tickets.models.repository.SincronizacionHuellaDao;
 import com.uap.control_tickets.models.repository.SincronizacionHuellaDetalleDao;
 import com.uap.control_tickets.services.biometrico.BiometriaException;
 import com.uap.control_tickets.services.biometrico.BiometricoDriver;
+import com.uap.control_tickets.services.biometrico.BiometricoDriverSelector;
 import com.uap.control_tickets.services.biometrico.CancelacionSincronizacion;
 import com.uap.control_tickets.services.biometrico.DedoBiometrico;
+import com.uap.control_tickets.services.biometrico.LineaCarga;
 import com.uap.control_tickets.services.biometrico.ProgresoBiometria;
-import com.uap.control_tickets.services.biometrico.SimulacionBiometricoDriver;
 import com.uap.control_tickets.services.biometrico.UsuarioBiometrico;
-import com.uap.control_tickets.services.biometrico.ZktecoTcpDriver;
+import com.uap.control_tickets.services.biometrico.UsuarioCarga;
 import com.uap.control_tickets.services.interfaces.SincronizacionHuellaService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -56,12 +58,8 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
     private final EstudianteDao estudianteDao;
     private final HuellaDigitalDao huellaDao;
     private final HuellaUsuarioProcesador procesador;
-    private final ZktecoTcpDriver driverReal;
-    private final SimulacionBiometricoDriver driverSimulado;
+    private final BiometricoDriverSelector selector;
     private final SimpMessagingTemplate ws;
-
-    @Value("${app.biometria.simulacion:false}")
-    private boolean simulacion;
 
     /** Cancelaciones pedidas desde la pantalla (jobId → true). */
     private final ConcurrentHashMap<Long, AtomicBoolean> cancelados = new ConcurrentHashMap<>();
@@ -69,7 +67,7 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
     private final ConcurrentHashMap<Long, Set<String>> rusPorJob = new ConcurrentHashMap<>();
 
     private BiometricoDriver driver() {
-        return simulacion ? driverSimulado : driverReal;
+        return selector.actual();
     }
 
     // -------------------------------------------------------------------------
@@ -107,6 +105,7 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
         ResultadoHuellaDto out = new ResultadoHuellaDto();
         out.setJobId(job.getIdSincronizacion());
         out.setEstado(job.getEstadoJob().name());
+        out.setDireccion(job.getDireccion().name());
         out.setEquipos(job.getEquipos());
         out.setTotal(job.getTotalUsuarios());
         out.setCorrectos(job.getCorrectos());
@@ -147,6 +146,38 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
             throw new NegocioException("La sincronización ya terminó (" + job.getEstadoJob() + ")");
         }
         cancelados.computeIfAbsent(jobId, k -> new AtomicBoolean(false)).set(true);
+    }
+
+    @Override
+    @Transactional
+    public Long iniciarCarga(CargaMasivaDto dto) {
+        DispositivoBiometrico eq = dispositivoDao.findById(dto.getIdDispositivo())
+                .filter(e -> e.getEstado() == EstadoRegistro.ACTIVO && e.getActivo())
+                .orElseThrow(() -> new NegocioException("Elegí un biométrico activo"));
+        String campo = dto.getCampo() == null ? "" : dto.getCampo().trim().toUpperCase();
+        String valor = dto.getValor() == null ? "" : dto.getValor().trim();
+        if (!"FACULTAD".equals(campo) && !"CARRERA".equals(campo)) {
+            throw new NegocioException("El campo debe ser FACULTAD o CARRERA");
+        }
+        if (valor.isEmpty()) throw new NegocioException("Elegí la facultad/carrera a cargar");
+        // Solo suben los que tienen huella: los demás se ignoran por completo.
+        long cuantos = "FACULTAD".equals(campo)
+                ? estudianteDao.contarConHuellaPorFacultad(EstadoRegistro.ACTIVO, valor)
+                : estudianteDao.contarConHuellaPorCarrera(EstadoRegistro.ACTIVO, valor);
+        if (cuantos == 0) {
+            throw new NegocioException("Nadie de " + valor + " tiene huella: no hay nada que cargar");
+        }
+        SincronizacionHuella job = new SincronizacionHuella();
+        job.setEstado(EstadoRegistro.ACTIVO);
+        job.setEstadoJob(EstadoSincronizacion.EN_CURSO);
+        job.setDireccion(DireccionSincronizacion.SUBIDA);
+        job.setEquipos("Carga " + campo.toLowerCase() + " " + valor + " → " + eq.getNombre()
+                + " (" + eq.getIp() + ")");
+        job.setTotalUsuarios((int) cuantos);
+        job = jobDao.save(job);
+        cancelados.put(job.getIdSincronizacion(), new AtomicBoolean(false));
+        ejecutarCarga(job.getIdSincronizacion(), eq.getIdDispositivo(), campo, valor);
+        return job.getIdSincronizacion();
     }
 
     @Override
@@ -238,10 +269,63 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
         }
     }
 
+    /**
+     * Carga masiva sistema → equipo. Corre en el pool "huellas" (un job por
+     * vez), SIN @Transactional: cada línea abre la suya en el procesador.
+     * El script avisa un RU por vez y acá se anota + publica en vivo.
+     */
+    @Async("huellasExecutor")
+    public void ejecutarCarga(Long jobId, Long idDispositivo, String campo, String valor) {
+        try {
+            exigirNoCancelado(jobId);
+            DispositivoBiometrico eq = dispositivoDao.findById(idDispositivo).orElse(null);
+            if (eq == null || eq.getEstado() != EstadoRegistro.ACTIVO || !eq.getActivo()) {
+                throw new NegocioException("El biométrico ya no está activo");
+            }
+            String equipo = eq.getNombre() + " (" + eq.getIp() + ")";
+            List<UsuarioCarga> carga = procesador.datosParaCarga(
+                    ("FACULTAD".equals(campo)
+                            ? estudianteDao.findAllByEstadoAndFacultad(EstadoRegistro.ACTIVO, valor)
+                            : estudianteDao.findAllByEstadoAndCarrera(EstadoRegistro.ACTIVO, valor))
+                            .stream().map(e -> e.getIdEstudiante()).toList())
+                    // Sin huella no sube: se ignora por completo.
+                    .stream().filter(u -> !u.templates().isEmpty()).toList();
+            driver().cargarUsuarios(eq, carga, linea -> {
+                exigirNoCancelado(jobId);
+                EstadoHuellaDetalle estado;
+                try {
+                    estado = EstadoHuellaDetalle.valueOf(linea.estado());
+                } catch (IllegalArgumentException e) {
+                    estado = EstadoHuellaDetalle.ERROR;
+                }
+                procesador.anotar(jobId, equipo, linea.ru(), estado, linea.mensaje());
+                // En SUBIDA "correctos" = cargados + actualizados.
+                procesador.avanzar(jobId, 0,
+                        estado == EstadoHuellaDetalle.ERROR ? EstadoHuellaDetalle.ERROR
+                                : EstadoHuellaDetalle.CORRECTO);
+                publicar(jobId, linea.ru(), equipo);
+            });
+            exigirNoCancelado(jobId);
+            procesador.cerrar(jobId, EstadoSincronizacion.FINALIZADO, null);
+            publicar(jobId, null, null);
+        } catch (CancelacionSincronizacion c) {
+            procesador.cerrar(jobId, EstadoSincronizacion.CANCELADO, "Cancelada por el usuario");
+            publicar(jobId, null, null);
+        } catch (BiometriaException e) {
+            procesador.cerrar(jobId, EstadoSincronizacion.ERROR, e.getMessage());
+            publicar(jobId, null, null);
+        } catch (RuntimeException e) {
+            try {
+                procesador.cerrar(jobId, EstadoSincronizacion.ERROR, "Error inesperado: " + e.getMessage());
+                publicar(jobId, null, null);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
 
-    private void exigirNoCancelado(Long jobId) {
-        AtomicBoolean flag = cancelados.get(jobId);
+    private void exigirNoCancelado(Long jobId) {        AtomicBoolean flag = cancelados.get(jobId);
         if (flag != null && flag.get()) throw new CancelacionSincronizacion();
     }
 
@@ -274,6 +358,8 @@ public class SincronizacionHuellaServiceImpl implements SincronizacionHuellaServ
         ProgresoHuellaDto p = new ProgresoHuellaDto();
         p.setJobId(j.getIdSincronizacion());
         p.setEstado(j.getEstadoJob().name());
+        p.setDireccion(j.getDireccion().name());
+        p.setEquipos(j.getEquipos());
         p.setTotal(j.getTotalUsuarios());
         p.setProcesados(j.getProcesados());
         p.setPorcentaje(j.getTotalUsuarios() <= 0 ? 0

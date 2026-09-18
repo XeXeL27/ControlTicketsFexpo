@@ -42,4 +42,12 @@ public class DispositivoBiometrico extends AuditoriaConfig {
     /** Si está apagado se lo salta al sincronizar (sin borrarlo). */
     @Column(name = "activo", nullable = false)
     private Boolean activo = true;
+
+    /**
+     * Clave de comunicación del equipo (solo dígitos, la que se pone en el
+     * teclado del biométrico). Si es null/vacía se conecta sin autenticar.
+     * Se guarda en claro porque el protocolo la necesita para el handshake.
+     */
+    @Column(name = "clave_comunicacion", length = 20)
+    private String claveComunicacion;
 }
