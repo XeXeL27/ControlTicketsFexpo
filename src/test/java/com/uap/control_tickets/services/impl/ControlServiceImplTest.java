@@ -24,6 +24,7 @@ class ControlServiceImplTest {
     @Mock TicketDao ticketDao;
     @Mock AccesoDao accesoDao;
     @Mock ApiService api;
+    @Mock CalendarioFeria calendario;
     @InjectMocks ControlServiceImpl service;
 
     private Ticket ticket(CategoriaTicket categoria, boolean dentro) {
@@ -45,11 +46,26 @@ class ControlServiceImplTest {
         return ticket;
     }
 
+    /**
+     * El ultimo movimiento fue HOY: el flag 'dentro' no esta vencido y el
+     * anti-clones aplica normal (logica de jornada de ControlServiceImpl).
+     * Sin esto el mock devuelve "sin movimientos" y el validador limpia el
+     * 'dentro' por incoherente antes del anti-clones.
+     */
+    private void ultimoMovimientoHoy() {
+        Acceso ultimo = new Acceso();
+        ultimo.setFechaHora(Instant.now());
+        when(accesoDao.findTopByTicketIdTicketOrderByFechaHoraDesc(1L))
+                .thenReturn(Optional.of(ultimo));
+        when(calendario.esDeUnDiaAnterior(any())).thenReturn(false);
+    }
+
     @ParameterizedTest
     @EnumSource(value = CategoriaTicket.class, names = {"ADMINISTRATIVO", "DOCENTE", "EXTERNO"})
     void otrosTiposEntranYSalenSoloConBaseLocal(CategoriaTicket categoria) {
         Ticket ticket = ticket(categoria, false);
         when(ticketDao.buscarParaControl("PRUEBA-1")).thenReturn(Optional.of(ticket));
+        ultimoMovimientoHoy();
         assertTrue(service.validar("PRUEBA-1", TipoAcceso.ENTRADA).isDentro());
         assertFalse(service.validar("PRUEBA-1", TipoAcceso.SALIDA).isDentro());
         verify(accesoDao, times(2)).save(any());
@@ -80,6 +96,7 @@ class ControlServiceImplTest {
         assertFalse(ticket.isDentro());
         verify(accesoDao, never()).save(any());
         ticket.setDentro(true);
+        ultimoMovimientoHoy();
         assertFalse(service.validar("qr", TipoAcceso.SALIDA).isDentro());
         verify(accesoDao).save(any());
     }
@@ -97,6 +114,7 @@ class ControlServiceImplTest {
     @Test
     void lecturaRepetidaNoInvierteEstadoNiDuplicaMovimiento() {
         when(ticketDao.buscarParaControl("qr")).thenReturn(Optional.of(ticket(CategoriaTicket.DOCENTE, false)));
+        ultimoMovimientoHoy();
         service.validar("qr", TipoAcceso.ENTRADA);
         var repetida = service.validar("qr", TipoAcceso.ENTRADA);
         assertTrue(repetida.isDentro());
