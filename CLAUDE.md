@@ -485,6 +485,25 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
   (`pnpm-lock.yaml`, más viejo que el de npm, y `pnpm-workspace.yaml` con un valor
   sin completar); no mezclar gestores.
 
+### Despliegue en uno (perfil maven `produccion`)
+
+`./mvnw clean package -Pproduccion` compila el frontend (Node propio vía
+frontend-maven-plugin, `npm ci` + `npm run build`) y lo mete en `/static` del jar:
+**un solo jar sirve front + API + WS en el mismo puerto** (verificado: jar con
+`static/index.html` + `assets/`). Sin el perfil el jar trae solo el backend.
+- `WebConfig` sirve `/static` y responde `index.html` a las rutas del router de
+  Vue (history: `/login`, `/estudiantes`…); `/api`, `/ws`, `/v3` y `swagger-ui`
+  nunca caen al `index.html`.
+- `SecurityConfig`: `/api/**` exige auth (salvo `/api/auth/**`); el resto
+  (estático + SPA) es público. Los datos siguen solo bajo `/api`.
+- El front ya habla en relativo (`/api`, WS por `location.host`), así que en el
+  jar anda sin proxy ni CORS.
+- Arranque en servidor (variables de entorno, ver
+  `application-produccion.properties`):
+  `DB_URL DB_USER DB_PASSWORD JWT_SECRET ADMIN_USER ADMIN_PASSWORD SIGSE_URL SIGSE_API_KEY`
+  + `java -jar target/*.jar --spring.profiles.active=produccion`.
+  `ddl-auto=validate` (no toca tablas) y `feria.validar-dia=true`.
+
 ---
 
 ## 7. Configuración y perfiles
@@ -494,6 +513,9 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
 - `application-jarv.properties` → entorno local de Javier. **Está en `.gitignore`,
   NO se sube** (tiene la clave de BD y el secreto JWT).
 - Perfil activo en local: `jarv`. En servidor se usará otro perfil.
+- `application-produccion.properties` → perfil del servidor. **Excepción: SÍ va a
+  git** (solo trae nombres de variables de entorno, sin secretos; ver excepción en
+  `.gitignore` y en `subir.sh`). Los valores se exportan en el servidor.
 
 > ⚠️ **Ojo con el nombre del archivo local.** Spring carga el perfil `jarv` desde
 > `application-jarv.properties` (con doble `p`) y `.gitignore` solo ignora ese

@@ -19,12 +19,14 @@ mensaje="${1:-}"
 rama="$(git rev-parse --abbrev-ref HEAD)"
 
 # Freno de seguridad: archivos que pueden tener claves NO se suben nunca.
-# (application.properties es la base sin claves; los de perfil van en .gitignore,
+# (application.properties es la base sin claves y application-produccion.properties
+# solo trae nombres de variables de entorno; los demas perfiles van en .gitignore,
 # pero un nombre mal escrito como "aplication-jarv.properties" se escaparía).
 sospechosos="$(git status --porcelain --untracked-files=all \
   | sed 's/^...//' \
   | grep -E '\.properties$|(^|/)\.env' \
-  | grep -vx 'src/main/resources/application.properties' || true)"
+  | grep -vx 'src/main/resources/application.properties' \
+  | grep -vx 'src/main/resources/application-produccion.properties' || true)"
 if [ -n "$sospechosos" ]; then
   echo "Frené: estos archivos pueden tener claves y no se suben:"
   echo "$sospechosos"

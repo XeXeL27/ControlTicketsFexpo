@@ -174,4 +174,94 @@
 		</plugins>
 	</build>
 
+	<!-- ============================================================
+	     Perfil PRODUCCION: empaqueta backend + frontend en un solo jar.
+	     El frontend compilado (frontend/dist) se copia a /static del jar y
+	     Spring Boot lo sirve en el mismo puerto que la API (ver WebConfig y
+	     SecurityConfig). Sin este perfil el jar solo trae el backend (modo
+	     desarrollo: front aparte con `npm run dev`).
+	     Uso:
+	       ./mvnw clean package -Pproduccion
+	       java -jar target/control_tickets-*.jar con el perfil Spring "produccion" activo
+	     ============================================================ -->
+	<profiles>
+		<profile>
+			<id>produccion</id>
+			<properties>
+				<!-- Al correr con este perfil, Spring Boot activa solo el properties de produccion. -->
+				<spring-boot.run.profiles>produccion</spring-boot.run.profiles>
+			</properties>
+			<build>
+				<plugins>
+					<!-- Compila el frontend con su propio Node (no exige Node en el servidor). -->
+					<plugin>
+						<groupId>com.github.eirslett</groupId>
+						<artifactId>frontend-maven-plugin</artifactId>
+						<version>1.15.1</version>
+						<configuration>
+							<workingDirectory>${project.basedir}/frontend</workingDirectory>
+							<installDirectory>${project.build.directory}/frontend-build</installDirectory>
+							<nodeVersion>v20.19.0</nodeVersion>
+						</configuration>
+						<executions>
+							<execution>
+								<id>instalar-node-npm</id>
+								<phase>generate-resources</phase>
+								<goals>
+									<goal>install-node-and-npm</goal>
+								</goals>
+								<configuration>
+									<npmVersion>10.8.2</npmVersion>
+								</configuration>
+							</execution>
+							<!-- ci (no install): respeta package-lock.json, build reproducible. -->
+							<execution>
+								<id>instalar-dependencias-frontend</id>
+								<phase>generate-resources</phase>
+								<goals>
+									<goal>npm</goal>
+								</goals>
+								<configuration>
+									<arguments>ci</arguments>
+								</configuration>
+							</execution>
+							<execution>
+								<id>compilar-frontend</id>
+								<phase>generate-resources</phase>
+								<goals>
+									<goal>npm</goal>
+								</goals>
+								<configuration>
+									<arguments>run build</arguments>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+					<!-- Mete lo compilado en /static del jar (corre despues: process-resources). -->
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-resources-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>copiar-frontend-a-static</id>
+								<phase>process-resources</phase>
+								<goals>
+									<goal>copy-resources</goal>
+								</goals>
+								<configuration>
+									<outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+									<resources>
+										<resource>
+											<directory>${project.basedir}/frontend/dist</directory>
+										</resource>
+									</resources>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
+
 </project>

@@ -70,9 +70,13 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(PUBLIC_URLS).permitAll()
-                // Todo lo demas exige al menos estar autenticado.
+                // La API exige al menos estar autenticado.
                 // El control por rol se afina con @PreAuthorize en cada controller.
-                .anyRequest().authenticated())
+                .requestMatchers("/api/**").authenticated()
+                // Todo lo demas (frontend empaquetado en /static + rutas del router
+                // de Vue como /login o /estudiantes) es publico: son archivos o el
+                // index.html, nunca datos. Los datos viven solo bajo /api/**.
+                .anyRequest().permitAll())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
