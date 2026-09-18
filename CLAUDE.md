@@ -498,10 +498,8 @@ frontend-maven-plugin, `npm ci` + `npm run build`) y lo mete en `/static` del ja
   (estático + SPA) es público. Los datos siguen solo bajo `/api`.
 - El front ya habla en relativo (`/api`, WS por `location.host`), así que en el
   jar anda sin proxy ni CORS.
-- Arranque en servidor (variables de entorno, ver
-  `application-produccion.properties`):
-  `DB_URL DB_USER DB_PASSWORD JWT_SECRET ADMIN_USER ADMIN_PASSWORD SIGSE_URL SIGSE_API_KEY`
-  + `java -jar target/*.jar --spring.profiles.active=produccion`.
+- Arranque en servidor (claves horneadas en el jar, sin variables de entorno):
+  `java -jar target/*.jar --spring.profiles.active=produccion`.
   `ddl-auto=validate` (no toca tablas) y `feria.validar-dia=true`.
 
 ---
@@ -513,9 +511,10 @@ frontend-maven-plugin, `npm ci` + `npm run build`) y lo mete en `/static` del ja
 - `application-jarv.properties` → entorno local de Javier. **Está en `.gitignore`,
   NO se sube** (tiene la clave de BD y el secreto JWT).
 - Perfil activo en local: `jarv`. En servidor se usará otro perfil.
-- `application-produccion.properties` → perfil del servidor. **Excepción: SÍ va a
-  git** (solo trae nombres de variables de entorno, sin secretos; ver excepción en
-  `.gitignore` y en `subir.sh`). Los valores se exportan en el servidor.
+- `application-produccion.properties` → perfil del servidor. **Tiene las claves
+  reales y NO va a git** (`.gitignore` lo ignora como a los demás perfiles; las
+  claves viajan dentro del jar, no en el repo). Si se reconstruye el jar, los
+  valores quedan horneados: no hacen falta variables de entorno.
 
 > ⚠️ **Ojo con el nombre del archivo local.** Spring carga el perfil `jarv` desde
 > `application-jarv.properties` (con doble `p`) y `.gitignore` solo ignora ese

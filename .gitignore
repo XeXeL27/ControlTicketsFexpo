@@ -25,9 +25,10 @@ target/
 ### Perfiles locales con credenciales (NO subir) ###
 src/main/resources/application-*.properties
 !src/main/resources/application.properties
-# Excepcion: el perfil de produccion solo trae nombres de variables de
-# entorno (sin secretos) y SI va a git para poder desplegar el servidor.
-!src/main/resources/application-produccion.properties
+!src/main/resources/application-*.properties.example
+
+### Python (cache del interprete, se regenera solo) ###
+__pycache__/
 
 ### Frontend ###
 frontend/node_modules/

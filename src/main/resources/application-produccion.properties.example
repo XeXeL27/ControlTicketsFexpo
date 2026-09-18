@@ -1,0 +1,16 @@
+# Plantilla del perfil de servidor (SIN secretos: este archivo SI va a git).
+# Copiar como application-produccion.properties y completar los valores reales.
+# Ese archivo con claves NO se sube (ver .gitignore).
+spring.datasource.url=jdbc:postgresql://IP_SERVIDOR:5432/NOMBRE_BD
+spring.datasource.username=
+spring.datasource.password=
+spring.jpa.hibernate.ddl-auto=validate
+app.jwt.secret=
+app.jwt.expiration-ms=86400000
+app.cors.allowed-origins=http://localhost:9099
+app.admin.username=
+app.admin.password=
+server.port=9099
+sigse.url=
+sigse.api-key=
+app.feria.validar-dia=true
