@@ -45,4 +45,10 @@ public interface EstudianteDao extends JpaRepository<Estudiante, Long> {
     @Query("select count(e) from Estudiante e where e.estado = :estado and e.carrera = :valor "
             + "and exists (select 1 from HuellaDigital h where h.estudiante = e and h.estado = :estado)")
     long contarConHuellaPorCarrera(EstadoRegistro estado, String valor);
+
+    /** Ids de persona con vinculo activo. Una sola consulta para clasificar el listado. */
+    @org.springframework.data.jpa.repository.Query(
+            "select e.persona.idPersona from Estudiante e where e.estado = :estado")
+    java.util.List<Long> idsPersonaActivas(
+            @org.springframework.data.repository.query.Param("estado") EstadoRegistro estado);
 }

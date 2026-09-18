@@ -18,7 +18,71 @@
 // document.createElement en vez de v-for) es a propósito: así el código es
 // casi calco del prototipo ya validado, con el mínimo riesgo de que algo se
 // vea distinto "por las dudas de Vue" en una primera integración.
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { auth } from '@/store/auth'
+import { useAlertas } from '@/composables/useAlertas'
+import { useConfirmacion } from '@/composables/useConfirmacion'
+import { mensajeError } from '@/utils/errores'
+import { guardarMapa, obtenerMapa, restaurarMapa } from '@/api/mapa-pulso.service'
+
+const alertas = useAlertas()
+const { confirmar } = useConfirmacion()
+
+/** Solo el administrador puede reacomodar el recinto. */
+const puedeEditar = auth.tieneRol('ADMINISTRADOR')
+
+/**
+ * Estado del modo edición. Vive fuera de onMounted porque lo usa la plantilla;
+ * el código 3D (imperativo) lo lee y lo escribe como cualquier objeto.
+ */
+const estado = reactive({
+  editando: false,
+  /** Ajustar a la grilla: sin esto quedan posiciones tipo 24.7391. */
+  snap: true,
+  /**
+   * Candado del arrastre. Arranca en FALSE (bloqueado) a propósito: con el mapa
+   * ya acomodado, un toque al girar la cámara movería un bloque sin querer y se
+   * pierde el trabajo. Hay que habilitar "Mover" explícitamente.
+   */
+  mover: false,
+  /** Qué se está editando: un bloque del recinto o un marcador de ingreso. */
+  tipoSeleccion: '' as '' | 'bloque' | 'ingreso',
+  /** Id interno de la zona seleccionada (los nombres pueden repetirse o faltar). */
+  idSeleccion: '' as string,
+  /** Nombre a mostrar de la zona seleccionada. */
+  seleccion: '' as string,
+  /** true = la seleccionada la agregó el usuario (se puede eliminar). */
+  seleccionAgregada: false,
+  /** Medidas de la zona seleccionada. */
+  ancho: 0,
+  largo: 0,
+  altura: 0,
+  /** Nombre editable del bloque (vacío = sin rótulo). */
+  nombre: '',
+  /** Color en formato CSS, para el <input type="color">. */
+  color: '#2b8fd6',
+  /** Transparencia del cuerpo, 0 a 1. */
+  opacidad: 0.16,
+  sinGuardar: false,
+  guardando: false,
+  /** Campos numéricos de la zona seleccionada (ajuste fino). */
+  px: 0,
+  py: 0,
+  rot: 0,
+})
+
+/** Puentes que conecta el bloque 3D al montarse (la escena es imperativa). */
+const puente = {
+  aplicarCampos: () => {},
+  guardar: async () => {},
+  descartar: () => {},
+  restaurar: async () => {},
+  salirEdicion: () => {},
+  agregar: () => {},
+  agregarIngreso: () => {},
+  refrescarCursor: () => {},
+  eliminar: async () => {},
+}
 import { useRouter } from 'vue-router'
 import * as THREE from 'three'
 import { resumenBoletos } from '@/api/control-boleto.service'
@@ -62,6 +126,8 @@ onMounted(async () => {
     alto?: number
     sinTitulo?: boolean
     contorno?: boolean
+    /** Transparencia del cuerpo (0 = invisible, 1 = sólido). Si falta, según la forma. */
+    opacidad?: number
   }
 
   const ZONAS_BASE: ZonaBase[] = [
@@ -188,17 +254,10 @@ onMounted(async () => {
       x.setLineDash([])
     })
 
-    // Zonas: huella rectangular de cada bloque en el piso (relleno + borde).
-    // La media luna no lleva huella rectangular (su forma 3D ya se ve y el
-    // rectángulo del piso no le calza).
-    ZONAS.forEach((z) => {
-      if (z.forma === 'medialuna') return
-      const x0 = px(z.px - z.w / 2), y0 = px(z.py - z.d / 2), w = px(z.w), h = px(z.d)
-      const col = colorCss(z.color)
-      x.fillStyle = col + '18'; x.fillRect(x0, y0, w, h)
-      x.strokeStyle = col + 'bb'; x.lineWidth = 2
-      x.strokeRect(x0, y0, w, h)
-    })
+    // NOTA: la huella de cada zona NO se pinta acá. Antes sí, y al mover un
+    // bloque en el modo edición la huella quedaba pintada en el piso como una
+    // "sombra" en la posición vieja. Ahora cada huella es una malla dentro del
+    // grupo de su zona (ver construirZona), así se mueve junto con el bloque.
 
     // Arbolado: puntos verdes tenues a lo largo de las avenidas (detalle).
     AVENIDAS.forEach(([a, b]) => {
@@ -289,7 +348,32 @@ onMounted(async () => {
   // Bloques 3D: cada zona según su forma (caja/torre/losa/domo). Se dibujan
   // como cuerpo semitransparente + aristas brillantes (estilo holográfico del
   // Pulso) y, si tienen rótulo, un título flotante encima.
-  ZONAS.forEach((z) => {
+  /**
+   * Cada zona se arma dentro de un THREE.Group y no suelta en la escena.
+   * Asi, al moverla en el modo edicion, el cuerpo, las aristas y el titulo se
+   * mueven juntos: basta con cambiar la posicion del grupo.
+   */
+  const zonasRender: {
+    /** Id estable propio: hay zonas sin rótulo y las agregadas pueden repetir nombre. */
+    id: string
+    grupo: THREE.Group
+    base: (typeof ZONAS)[number]
+    /** true = la agregó el usuario, no viene del código. */
+    agregada: boolean
+    /** Acomodo actual, lo que se edita y se guarda. */
+    px: number; py: number; rot: number
+  }[] = []
+  let contadorId = 0
+
+  /**
+   * Arma el grupo 3D de una zona: huella en el piso + cuerpo + aristas + título.
+   * Está como función (y no como bucle suelto) para poder AGREGAR bloques nuevos
+   * en el modo edición reutilizando exactamente el mismo dibujo.
+   */
+  function construirZona(z: (typeof ZONAS)[number]) {
+    const grupo = new THREE.Group()
+    grupo.position.set(z.x, 0, z.zc)
+    scene.add(grupo)
     const alto = (z.alto ?? 4) * ESCALA
     let geo: THREE.BufferGeometry
     let cy: number // altura del centro del cuerpo
@@ -318,33 +402,39 @@ onMounted(async () => {
     // Losa y media luna van más opacas para leerse como plataforma plana.
     if (!z.contorno) {
       const plana = z.forma === 'losa' || z.forma === 'medialuna'
+      // Si la zona trae opacidad propia (la eligió el usuario) manda esa; si no,
+      // el valor por defecto según la forma.
+      const opacidad = z.opacidad ?? (plana ? 0.4 : 0.16)
       const cuerpo = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: z.color, transparent: true, opacity: plana ? 0.4 : 0.16, depthWrite: false,
+        color: z.color, transparent: true, opacity: opacidad, depthWrite: false,
       }))
-      cuerpo.position.set(z.x, cy, z.zc)
+      cuerpo.position.set(0, cy, 0)
       cuerpo.rotation.y = rotY
-      scene.add(cuerpo)
+      grupo.add(cuerpo)
     }
     // Aristas brillantes.
     const edges = new THREE.EdgesGeometry(geo)
     const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
       color: z.color, transparent: true, opacity: z.contorno ? 0.75 : 0.6,
     }))
-    line.position.set(z.x, cy, z.zc)
+    line.position.set(0, cy, 0)
     line.rotation.y = rotY
-    scene.add(line)
+    grupo.add(line)
 
     // Título flotante.
     if (z.nombre && !z.sinTitulo) {
       const label = new THREE.Sprite(new THREE.SpriteMaterial({
         map: texturaTitulo(z.nombre, z.color), transparent: true, depthWrite: false,
       }))
-      const anchoBase = Math.min(30, Math.max(16, z.nombre.length * 1.6)) * ESCALA
+      // Los rótulos tapaban demasiado el mapa: se achicaron ~35%. El factor está
+      // acá arriba para poder ajustarlo de un solo lugar.
+      const FACTOR_TITULO = 0.65
+      const anchoBase = Math.min(30, Math.max(16, z.nombre.length * 1.6)) * ESCALA * FACTOR_TITULO
       label.scale.set(anchoBase, anchoBase * (128 / 512), 1)
       // La media luna abulta hacia afuera: su centro visual (centroide del
       // semicírculo, 4r/3π) está corrido hacia la curva, así que el título va
       // sobre ese punto y no sobre el borde recto.
-      let lx = z.x, lz = z.zc
+      let lx = 0, lz = 0
       if (z.forma === 'medialuna') {
         const r = Math.max(z.wx, z.wz) / 2
         const L = Math.hypot(z.x - centro.x, z.zc - centro.z) || 1
@@ -353,9 +443,79 @@ onMounted(async () => {
         lz += ((z.zc - centro.z) / L) * off
       }
       label.position.set(lx, topY + 3 * ESCALA, lz)
-      scene.add(label)
+      grupo.add(label)
     }
+
+    // Huella en el piso: antes se pintaba en la textura del suelo y quedaba como
+    // sombra al mover el bloque. Acá va dentro del grupo, así lo acompaña.
+    if (z.forma !== 'medialuna') {
+      const huella = new THREE.Mesh(
+        new THREE.PlaneGeometry(z.wx, z.wz),
+        new THREE.MeshBasicMaterial({
+          color: z.color, transparent: true, opacity: 0.09, depthWrite: false,
+        }),
+      )
+      huella.rotation.x = -Math.PI / 2
+      huella.position.set(0, 0.06, 0)
+      grupo.add(huella)
+
+      const borde = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.PlaneGeometry(z.wx, z.wz)),
+        new THREE.LineBasicMaterial({ color: z.color, transparent: true, opacity: 0.55 }),
+      )
+      borde.rotation.x = -Math.PI / 2
+      borde.position.set(0, 0.07, 0)
+      grupo.add(borde)
+    }
+
+    return grupo
+  }
+
+  ZONAS.forEach((z) => {
+    zonasRender.push({
+      id: 'base-' + contadorId++, grupo: construirZona(z), base: z,
+      agregada: false, px: z.px, py: z.py, rot: 0,
+    })
   })
+
+  /** Arma el objeto de zona (con las medidas ya en unidades de mundo). */
+  function definirZona(d: {
+    nombre: string; px: number; py: number; w: number; d: number
+    alto: number; color: number; opacidad?: number
+  }) {
+    return {
+      nombre: d.nombre, px: d.px, py: d.py, w: d.w, d: d.d, alto: d.alto, color: d.color,
+      opacidad: d.opacidad,
+      x: fx(d.px), zc: fz(d.py), wx: (d.w / 100) * WORLD_W, wz: (d.d / 100) * WORLD_D,
+    } as (typeof ZONAS)[number]
+  }
+
+  /** Agrega un bloque nuevo en el centro del recinto, listo para arrastrar. */
+  function agregarZona(nombre: string) {
+    const z = definirZona({
+      nombre, px: 50, py: 50, w: 9, d: 7, alto: 6, color: 0x2b8fd6,
+    })
+    const zr = {
+      id: 'nueva-' + contadorId++, grupo: construirZona(z), base: z,
+      agregada: true, px: z.px, py: z.py, rot: 0,
+    }
+    zonasRender.push(zr)
+    return zr
+  }
+
+  /** Saca un bloque de la escena y libera su memoria de video. */
+  function quitarZona(zr: (typeof zonasRender)[number]) {
+    zr.grupo.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.geometry) m.geometry.dispose()
+      const mat = (m as unknown as { material?: THREE.Material | THREE.Material[] }).material
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose())
+      else if (mat) mat.dispose()
+    })
+    scene.remove(zr.grupo)
+    const i = zonasRender.indexOf(zr)
+    if (i >= 0) zonasRender.splice(i, 1)
+  }
 
   // Logo FEXPO como parte de la escena 3D: flota sobre el centro del recinto,
   // anclado en el mundo (orbita/escala con el mapa, no pegado a la pantalla).
@@ -411,32 +571,90 @@ onMounted(async () => {
   })
 
   // Puertas.
+  /**
+   * Los ingresos también viven en un Group, por el mismo motivo que las zonas:
+   * el anillo, el haz de luz y el rótulo tienen que moverse juntos al arrastrar.
+   * Se guarda el anillo aparte porque el bucle de animación lo hace latir.
+   */
+  const gatesRender: {
+    id: string
+    grupo: THREE.Group
+    ring: THREE.Mesh
+    nombre: string
+    color: number
+    px: number; py: number
+    agregado: boolean
+  }[] = []
+
+  function construirGate(g: { nombre: string; color: number; px: number; py: number }) {
+    const grupo = new THREE.Group()
+    grupo.position.set(fx(g.px), 0, fz(g.py))
+    // El anillo mira al centro del recinto, como en el diseño original.
+    grupo.rotation.y = Math.atan2(centro.x - fx(g.px), centro.z - fz(g.py))
+    scene.add(grupo)
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(5.6 * ESCALA, 0.42 * ESCALA, 16, 48),
+      new THREE.MeshBasicMaterial({ color: g.color }))
+    ring.position.set(0, 5.8 * ESCALA, 0)
+    grupo.add(ring)
+
+    const haz = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16 * ESCALA, 0.16 * ESCALA, 34 * ESCALA, 8, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: g.color, transparent: true, opacity: 0.22,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }))
+    haz.position.set(0, 17 * ESCALA, 0)
+    grupo.add(haz)
+
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texturaEtiqueta(g.nombre, colorCss(g.color), 26), transparent: true, depthWrite: false }))
+    // Mismo achique que los títulos de zona: los rótulos tapaban el mapa.
+    label.scale.set(16 * ESCALA * 0.65, (16 * 92 * ESCALA * 0.65) / 360, 1)
+    label.position.set(0, 12.8 * ESCALA, 0)
+    // El rótulo es un sprite: no debe heredar el giro del grupo.
+    grupo.add(label)
+
+    return { grupo, ring }
+  }
+
+  function agregarGate(d: { nombre: string; color: number; px: number; py: number; agregado: boolean }) {
+    const { grupo, ring } = construirGate(d)
+    const gr = { id: 'gate-' + contadorId++, grupo, ring, ...d }
+    gatesRender.push(gr)
+    return gr
+  }
+
+  function quitarGate(gr: (typeof gatesRender)[number]) {
+    gr.grupo.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.geometry) m.geometry.dispose()
+      const mat = (m as unknown as { material?: THREE.Material | THREE.Material[] }).material
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose())
+      else if (mat) mat.dispose()
+    })
+    scene.remove(gr.grupo)
+    const i = gatesRender.indexOf(gr)
+    if (i >= 0) gatesRender.splice(i, 1)
+  }
+
   GATES.forEach((g) => {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(5.6 * ESCALA, 0.42 * ESCALA, 16, 48), new THREE.MeshBasicMaterial({ color: g.color }))
-    ring.position.set(g.pos[0], 5.8 * ESCALA, g.pos[2])
-    ring.rotation.y = g.rotY
-    scene.add(ring)
-    g.ringMesh = ring
-
-    const haz = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * ESCALA, 0.16 * ESCALA, 34 * ESCALA, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: g.color, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }))
-    haz.position.set(g.pos[0], 17 * ESCALA, g.pos[2])
-    scene.add(haz)
-
-    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaEtiqueta(g.nombre, colorCss(g.color), 26), transparent: true, depthWrite: false }))
-    label.scale.set(16 * ESCALA, (16 * 92 * ESCALA) / 360, 1)
-    label.position.set(g.pos[0], 12.8 * ESCALA, g.pos[2])
-    scene.add(label)
+    const gr = agregarGate({ nombre: g.nombre, color: g.color, px: g.px, py: g.py, agregado: false })
+    g.ringMesh = gr.ring
   })
 
   // Pulsos.
   const pulsos: { mesh: THREE.Mesh; t0: number; dur: number }[] = []
   function lanzarPulso(gateIdx: number, colorHex: number) {
-    const g = GATES[gateIdx]!
+    // Se usa gatesRender (no GATES) porque los ingresos se pueden mover y
+    // agregar: el pulso tiene que salir de donde está el anillo AHORA.
+    const g = gatesRender[Math.min(gateIdx, gatesRender.length - 1)]
+    if (!g) return
     const mesh = new THREE.Mesh(new THREE.RingGeometry(0.2 * ESCALA, 0.85 * ESCALA, 40),
       new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.9, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }))
-    mesh.position.set(g.pos[0], 5.8 * ESCALA, g.pos[2])
-    mesh.rotation.y = g.rotY
+    mesh.position.set(g.grupo.position.x, 5.8 * ESCALA, g.grupo.position.z)
+    mesh.rotation.y = g.grupo.rotation.y
     scene.add(mesh)
     pulsos.push({ mesh, t0: performance.now(), dur: 650 })
   }
@@ -494,9 +712,9 @@ onMounted(async () => {
   function activarUna() {
     const p = particulas.find((p) => !p.activo)
     if (!p) return
-    const gIdx = Math.floor(Math.random() * GATES.length), g = GATES[gIdx]!
+    const gIdx = Math.floor(Math.random() * gatesRender.length), g = gatesRender[gIdx]!
     p.activo = true; p.estado = 'entrando'
-    p.x = g.pos[0]; p.z = g.pos[2]
+    p.x = g.grupo.position.x; p.z = g.grupo.position.z
     const dest = puntoInterior(); p.tx = dest[0]; p.tz = dest[1]
     activos++
   }
@@ -504,8 +722,8 @@ onMounted(async () => {
     const candidatas = particulas.filter((p) => p.activo && p.estado === 'vagando')
     if (!candidatas.length) return
     const p = candidatas[Math.floor(Math.random() * candidatas.length)]!
-    const g = GATES[Math.floor(Math.random() * GATES.length)]!
-    p.estado = 'saliendo'; p.tx = g.pos[0]; p.tz = g.pos[2]
+    const g = gatesRender[Math.floor(Math.random() * gatesRender.length)]!
+    p.estado = 'saliendo'; p.tx = g.grupo.position.x; p.tz = g.grupo.position.z
   }
 
   // ---------------------------------------------------------------------
@@ -570,12 +788,12 @@ onMounted(async () => {
     if (evento.tipo === 'BLOQUEADO' || evento.tipo === 'NO_VALIDO') {
       filaInvalida(evento.codigo, evento.motivo ?? evento.tipo)
       // Igual se ve un pulso tenue rojo en una puerta al azar: alguien lo intentó ahí.
-      lanzarPulso(Math.floor(Math.random() * GATES.length), 0xff4d6d)
+      lanzarPulso(Math.floor(Math.random() * gatesRender.length), 0xff4d6d)
       return
     }
     const esSalida = evento.tipo === 'SALIDA'
     const gIdx = Math.floor(Math.random() * GATES.length) // no sabemos la puerta real (ver nota arriba)
-    const g = GATES[gIdx]!
+    const g = gatesRender[gIdx]!
     st.dentro = evento.dentroAhora
     let tipoTexto: string
     if (esSalida) {
@@ -607,6 +825,403 @@ onMounted(async () => {
   const clockInterval = setInterval(clock, 1000)
 
   // ---------------------------------------------------------------------
+  // MODO EDICIÓN del mapa
+  //
+  // Se arrastra sobre el PLANO DEL PISO, no sobre el plano de la pantalla: se
+  // proyecta el puntero contra y=0 y se fija solo X y Z. Asi el bloque nunca se
+  // despega del suelo, que es lo que pasaria con DragControls (mueve en el plano
+  // de la camara). Son pocas lineas y es el comportamiento correcto para un plano.
+  // ---------------------------------------------------------------------
+  const rayo = new THREE.Raycaster()
+  const puntero = new THREE.Vector2()
+  const planoPiso = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+  const puntoPiso = new THREE.Vector3()
+  let zonaArrastrada: (typeof zonasRender)[number] | null = null
+  let gateArrastrado: (typeof gatesRender)[number] | null = null
+  /** Dónde empezó el gesto, para distinguir un clic de un giro de cámara. */
+  let clicInicio: { x: number; y: number } | null = null
+  /** Diferencia entre donde se tocó y el centro de la zona, para que no salte. */
+  const agarre = new THREE.Vector3()
+
+  /** Convierte el puntero a coordenadas normalizadas y lo proyecta al piso. */
+  function punteroAlPiso(e: PointerEvent): THREE.Vector3 | null {
+    const r = canvas.getBoundingClientRect()
+    puntero.x = ((e.clientX - r.left) / r.width) * 2 - 1
+    puntero.y = -((e.clientY - r.top) / r.height) * 2 + 1
+    rayo.setFromCamera(puntero, camera)
+    return rayo.ray.intersectPlane(planoPiso, puntoPiso) ? puntoPiso.clone() : null
+  }
+
+  /** El ingreso más cercano al punto tocado, si hay alguno en su radio. */
+  function gateEn(punto: THREE.Vector3) {
+    let mejor: (typeof gatesRender)[number] | null = null
+    let mejorDist = Infinity
+    const radio = 7 * ESCALA // un poco más que el anillo, para agarrarlo cómodo
+    for (const gr of gatesRender) {
+      const d = Math.hypot(punto.x - gr.grupo.position.x, punto.z - gr.grupo.position.z)
+      if (d <= radio && d < mejorDist) { mejor = gr; mejorDist = d }
+    }
+    return mejor
+  }
+
+  /** La zona cuyo centro está más cerca del punto tocado (dentro de un radio). */
+  function zonaEn(punto: THREE.Vector3) {
+    let mejor: (typeof zonasRender)[number] | null = null
+    let mejorDist = Infinity
+    for (const zr of zonasRender) {
+      const dx = punto.x - zr.grupo.position.x
+      const dz = punto.z - zr.grupo.position.z
+      // Radio de agarre: la mitad del bloque más un margen para los chicos.
+      const radio = Math.max(zr.base.wx, zr.base.wz) / 2 + 2 * ESCALA
+      const d = Math.hypot(dx, dz)
+      if (d <= radio && d < mejorDist) { mejor = zr; mejorDist = d }
+    }
+    return mejor
+  }
+
+  /**
+   * Redondea a la grilla y mantiene el bloque DENTRO del recinto.
+   * Sin el tope se puede arrastrar una zona a valores negativos y queda flotando
+   * en el vacío, fuera del piso, sin forma evidente de recuperarla.
+   */
+  function ajustar(valor: number) {
+    const paso = 0.5 // en porcentaje del recinto
+    const v = estado.snap ? Math.round(valor / paso) * paso : valor
+    return Math.max(0, Math.min(100, v))
+  }
+
+  /** Aplica a la escena el acomodo que tiene la zona en memoria. */
+  function aplicarZona(zr: (typeof zonasRender)[number]) {
+    zr.grupo.position.set(fx(zr.px), 0, fz(zr.py))
+    zr.grupo.rotation.y = (zr.rot * Math.PI) / 180
+  }
+
+  /**
+   * El acomodo completo. Guarda la DEFINICIÓN entera de cada zona (no solo su
+   * posición) porque ahora se pueden agregar y quitar bloques: al recargar hay
+   * que poder reconstruir el mapa tal cual quedó, no solo mover los del código.
+   */
+  function acomodoActual() {
+    return {
+      version: 3,
+      zonas: zonasRender.map((zr) => ({
+        nombre: zr.base.nombre,
+        px: zr.px, py: zr.py, rot: zr.rot,
+        w: zr.base.w, d: zr.base.d, alto: zr.base.alto ?? 4,
+        color: zr.base.color,
+        opacidad: zr.base.opacidad ?? null,
+        forma: zr.base.forma ?? null,
+        contorno: zr.base.contorno ?? false,
+        sinTitulo: zr.base.sinTitulo ?? false,
+        agregada: zr.agregada,
+      })),
+      ingresos: gatesRender.map((gr) => ({
+        nombre: gr.nombre, px: gr.px, py: gr.py, color: gr.color, agregado: gr.agregado,
+      })),
+    }
+  }
+
+  /** Reposiciona el ingreso y lo deja mirando al centro del recinto. */
+  function aplicarGate(gr: (typeof gatesRender)[number]) {
+    gr.grupo.position.set(fx(gr.px), 0, fz(gr.py))
+    gr.grupo.rotation.y = Math.atan2(centro.x - fx(gr.px), centro.z - fz(gr.py))
+  }
+
+  /** Panel cuando lo seleccionado es un INGRESO (no tiene tamaño ni forma). */
+  function sincronizarPanelGate(gr: (typeof gatesRender)[number]) {
+    estado.tipoSeleccion = 'ingreso'
+    estado.idSeleccion = gr.id
+    estado.seleccion = gr.nombre
+    estado.seleccionAgregada = gr.agregado
+    estado.px = Math.round(gr.px * 10) / 10
+    estado.py = Math.round(gr.py * 10) / 10
+    estado.nombre = gr.nombre
+    estado.color = colorCss(gr.color)
+  }
+
+  /** Refleja en el panel los números de la zona seleccionada. */
+  function sincronizarPanel(zr: (typeof zonasRender)[number]) {
+    estado.tipoSeleccion = 'bloque'
+    estado.idSeleccion = zr.id
+    estado.seleccion = zr.base.nombre || '(sin rótulo)'
+    estado.seleccionAgregada = zr.agregada
+    estado.px = Math.round(zr.px * 10) / 10
+    estado.py = Math.round(zr.py * 10) / 10
+    estado.rot = Math.round(zr.rot)
+    estado.ancho = zr.base.w
+    estado.largo = zr.base.d
+    estado.altura = zr.base.alto ?? 4
+    estado.nombre = zr.base.nombre
+    estado.color = colorCss(zr.base.color)
+    const plana = zr.base.forma === 'losa' || zr.base.forma === 'medialuna'
+    estado.opacidad = zr.base.opacidad ?? (plana ? 0.4 : 0.16)
+  }
+
+  /** La zona seleccionada ahora, si hay alguna. Se busca por id, no por nombre. */
+  function zonaSeleccionada() {
+    return zonasRender.find((z) => z.id === estado.idSeleccion) ?? null
+  }
+
+  type ZonaGuardada = {
+    nombre: string; px: number; py: number; rot?: number
+    w?: number; d?: number; alto?: number; color?: number
+    forma?: string | null; contorno?: boolean; sinTitulo?: boolean; agregada?: boolean
+    opacidad?: number | null
+  }
+
+  /**
+   * Carga un acomodo guardado RECONSTRUYENDO el mapa entero.
+   *
+   * Se rehace todo en vez de solo mover lo existente porque el acomodo puede
+   * tener bloques agregados por el usuario y puede faltarle bloques del código
+   * que se eliminaron. Reconstruir es lo único que refleja las dos cosas.
+   */
+  function aplicarAcomodo(json: string) {
+    try {
+      const datos = JSON.parse(json) as {
+        version?: number
+        zonas?: ZonaGuardada[]
+        ingresos?: { nombre: string; px: number; py: number; color?: number; agregado?: boolean }[]
+      }
+      if (!datos.zonas?.length) return false
+
+      // Formato viejo (v1): solo traía posiciones; se mueve lo que exista.
+      if (!datos.version || datos.version < 2) {
+        for (const g of datos.zonas) {
+          const zr = zonasRender.find((z) => z.base.nombre === g.nombre)
+          if (!zr) continue
+          zr.px = g.px; zr.py = g.py; zr.rot = g.rot ?? 0
+          aplicarZona(zr)
+        }
+        return true
+      }
+
+      // v2/v3: el documento es el mapa completo.
+      ;[...zonasRender].forEach(quitarZona)
+      // Los ingresos solo vienen desde v3; si no están, se dejan los del código.
+      if (datos.ingresos?.length) {
+        ;[...gatesRender].forEach(quitarGate)
+        for (const g of datos.ingresos) {
+          agregarGate({
+            nombre: g.nombre, color: g.color ?? 0x33e0ff,
+            px: g.px, py: g.py, agregado: !!g.agregado,
+          })
+        }
+      }
+      for (const g of datos.zonas) {
+        const z = definirZona({
+          nombre: g.nombre, px: g.px, py: g.py,
+          w: g.w ?? 9, d: g.d ?? 7, alto: g.alto ?? 4, color: g.color ?? 0x2b8fd6,
+          opacidad: g.opacidad ?? undefined,
+        })
+        // Forma y banderas solo las traen las zonas del diseño original.
+        if (g.forma) (z as { forma?: string }).forma = g.forma
+        if (g.contorno) (z as { contorno?: boolean }).contorno = true
+        if (g.sinTitulo) (z as { sinTitulo?: boolean }).sinTitulo = true
+        const zr = {
+          id: 'carg-' + contadorId++, grupo: construirZona(z), base: z,
+          agregada: !!g.agregada, px: g.px, py: g.py, rot: g.rot ?? 0,
+        }
+        zr.grupo.rotation.y = (zr.rot * Math.PI) / 180
+        zonasRender.push(zr)
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Acomodo con el que se entró a editar, para poder descartar los cambios. */
+  let acomodoPrevio = JSON.stringify(acomodoActual())
+
+  // --- Puentes que usa la plantilla ---
+  puente.aplicarCampos = () => {
+    // Un ingreso solo tiene posición, nombre y color: no tiene tamaño ni forma.
+    if (estado.tipoSeleccion === 'ingreso') {
+      const gr = gatesRender.find((g) => g.id === estado.idSeleccion)
+      if (!gr) return
+      const dentro = (v: number) => Math.max(0, Math.min(100, Number(v) || 0))
+      gr.px = dentro(estado.px); gr.py = dentro(estado.py)
+      estado.px = gr.px; estado.py = gr.py
+      const nombre = (estado.nombre ?? '').trim() || gr.nombre
+      const color = parseInt((estado.color || '#33e0ff').replace('#', ''), 16)
+      if (nombre !== gr.nombre || color !== gr.color) {
+        // El rótulo y el color están horneados en la textura: se rehace el ingreso.
+        const px = gr.px, py = gr.py, agregado = gr.agregado, id = gr.id
+        quitarGate(gr)
+        const nuevo = agregarGate({ nombre, color, px, py, agregado })
+        nuevo.id = id
+        sincronizarPanelGate(nuevo)
+      } else {
+        aplicarGate(gr)
+      }
+      estado.sinGuardar = true
+      return
+    }
+    const zr = zonaSeleccionada()
+    if (!zr) return
+    // Mismo tope que al arrastrar: escribir "-20" a mano tampoco debe sacar el
+    // bloque del recinto.
+    const dentro = (v: number) => Math.max(0, Math.min(100, Number(v) || 0))
+    zr.px = dentro(estado.px); zr.py = dentro(estado.py)
+    zr.rot = ((Number(estado.rot) || 0) % 360 + 360) % 360
+    estado.px = zr.px; estado.py = zr.py; estado.rot = zr.rot
+
+    // Si cambió el tamaño hay que REHACER la malla: la geometría ya está creada
+    // con las medidas viejas y escalarla deformaría el título y las aristas.
+    const w = Math.max(1, Math.min(60, Number(estado.ancho) || zr.base.w))
+    const d = Math.max(1, Math.min(60, Number(estado.largo) || zr.base.d))
+    const alto = Math.max(0.3, Math.min(40, Number(estado.altura) || 4))
+    const nombre = (estado.nombre ?? '').trim()
+    const color = parseInt((estado.color || '#2b8fd6').replace('#', ''), 16)
+    const plana = zr.base.forma === 'losa' || zr.base.forma === 'medialuna'
+    const opacidad = Math.max(0, Math.min(1, Number(estado.opacidad)))
+    const opacidadPrevia = zr.base.opacidad ?? (plana ? 0.4 : 0.16)
+
+    // El nombre y el color están "horneados" en la textura del rótulo, así que
+    // cambiarlos obliga a rehacer la malla igual que un cambio de tamaño.
+    const cambio = w !== zr.base.w || d !== zr.base.d || alto !== (zr.base.alto ?? 4)
+      || nombre !== zr.base.nombre || color !== zr.base.color
+      || Math.abs(opacidad - opacidadPrevia) > 0.001
+    if (cambio) {
+      const nueva = definirZona({
+        nombre, px: zr.px, py: zr.py, w, d, alto, color, opacidad,
+      })
+      const forma = (zr.base as { forma?: string }).forma
+      if (forma) (nueva as { forma?: string }).forma = forma
+      const indice = zonasRender.indexOf(zr)
+      quitarZona(zr)
+      const rehecha = {
+        id: zr.id, grupo: construirZona(nueva), base: nueva,
+        agregada: zr.agregada, px: zr.px, py: zr.py, rot: zr.rot,
+      }
+      rehecha.grupo.rotation.y = (zr.rot * Math.PI) / 180
+      zonasRender.splice(Math.max(0, indice), 0, rehecha)
+      estado.ancho = w; estado.largo = d; estado.altura = alto
+      estado.nombre = nombre; estado.seleccion = nombre || '(sin rótulo)'
+      estado.opacidad = opacidad
+    }
+    aplicarZona(zr)
+    estado.sinGuardar = true
+  }
+
+  puente.guardar = async () => {
+    estado.guardando = true
+    try {
+      await guardarMapa(JSON.stringify(acomodoActual()))
+      acomodoPrevio = JSON.stringify(acomodoActual())
+      estado.sinGuardar = false
+      alertas.exito('Mapa guardado. Todos los que vean el Pulso lo verán así.')
+    } catch (e) {
+      alertas.error(mensajeError(e, 'No se pudo guardar el mapa'))
+    } finally {
+      estado.guardando = false
+    }
+  }
+
+  puente.descartar = () => {
+    aplicarAcomodo(acomodoPrevio)
+    estado.sinGuardar = false
+    estado.seleccion = ''
+  }
+
+  puente.restaurar = async () => {
+    if (!(await confirmar({
+      titulo: 'Restaurar el mapa original',
+      mensaje: 'Se borra el acomodo guardado y el mapa vuelve al diseño original. ¿Continuar?',
+      peligro: true,
+    }))) return
+    try {
+      await restaurarMapa()
+      // Volver a las posiciones que trae el código.
+      zonasRender.forEach((zr) => {
+        zr.px = zr.base.px; zr.py = zr.base.py; zr.rot = 0
+        aplicarZona(zr)
+      })
+      ;[...gatesRender].forEach(quitarGate)
+      GATES.forEach((g) => agregarGate({
+        nombre: g.nombre, color: g.color, px: g.px, py: g.py, agregado: false,
+      }))
+      acomodoPrevio = JSON.stringify(acomodoActual())
+      estado.sinGuardar = false
+      estado.seleccion = ''
+      alertas.exito('Mapa restaurado al original.')
+    } catch (e) {
+      alertas.error(mensajeError(e, 'No se pudo restaurar'))
+    }
+  }
+
+  puente.agregar = () => {
+    const zr = agregarZona('Bloque nuevo')
+    sincronizarPanel(zr)
+    estado.sinGuardar = true
+    alertas.info('Bloque agregado en el centro. Arrastrelo a su lugar.')
+  }
+
+  puente.eliminar = async () => {
+    if (estado.tipoSeleccion === 'ingreso') {
+      const gr = gatesRender.find((g) => g.id === estado.idSeleccion)
+      if (!gr) return
+      if (gatesRender.length <= 1) {
+        alertas.error('Debe quedar al menos un ingreso: por ahí entran las personas en el monitoreo.')
+        return
+      }
+      if (!(await confirmar({
+        titulo: 'Eliminar ingreso', mensaje: `Se quita "${gr.nombre}" del mapa.`, peligro: true,
+      }))) return
+      quitarGate(gr)
+      estado.idSeleccion = ''; estado.seleccion = ''; estado.tipoSeleccion = ''
+      estado.sinGuardar = true
+      return
+    }
+    const zr = zonaSeleccionada()
+    if (!zr) return
+    if (!(await confirmar({
+      titulo: 'Eliminar bloque',
+      mensaje: `Se quita "${zr.base.nombre || 'el bloque'}" del mapa.`,
+      peligro: true,
+    }))) return
+    quitarZona(zr)
+    estado.idSeleccion = ''; estado.seleccion = ''
+    estado.sinGuardar = true
+  }
+
+  puente.agregarIngreso = () => {
+    const gr = agregarGate({
+      nombre: 'Ingreso ' + (gatesRender.length + 1), color: 0x33e0ff,
+      px: 50, py: 12, agregado: true,
+    })
+    sincronizarPanelGate(gr)
+    estado.sinGuardar = true
+    alertas.info('Ingreso agregado. Arrástrelo a su lugar.')
+  }
+
+  /** Mantiene el cursor acorde al candado (lo llama el watch de la plantilla). */
+  puente.refrescarCursor = () => {
+    canvas.style.cursor = estado.editando && estado.mover ? 'crosshair' : 'grab'
+  }
+
+  puente.salirEdicion = () => {
+    estado.editando = false
+    estado.mover = false
+    estado.seleccion = ''
+    estado.tipoSeleccion = ''
+    canvas.style.cursor = 'grab'
+  }
+
+  // Al abrir la pantalla se aplica el acomodo guardado, si lo hay.
+  obtenerMapa()
+    .then((m) => {
+      if (m.personalizado && m.contenido && aplicarAcomodo(m.contenido)) {
+        acomodoPrevio = JSON.stringify(acomodoActual())
+      }
+    })
+    .catch(() => {
+      // Sin acomodo guardado (o sin permiso de lectura) el mapa queda como el
+      // original del código: la pantalla sigue funcionando igual.
+    })
+
+  // ---------------------------------------------------------------------
   // Cámara: órbita manual (drag + rueda) con auto-rotación en reposo
   // ---------------------------------------------------------------------
   let camAz = 0.6, camPolar = 0.9, camDist = 150 * ESCALA
@@ -614,11 +1229,66 @@ onMounted(async () => {
   canvas.style.cursor = 'grab'
 
   function onDown(e: PointerEvent) {
+    // En modo edición, tocar una zona la agarra; tocar el piso vacío sigue
+    // girando la cámara. Así se editan los bloques sin perder la navegación.
+    if (estado.editando && !estado.mover) {
+      // Candado cerrado: no se agarra nada. Se recuerda dónde empezó el gesto
+      // para distinguir, al soltar, un clic (seleccionar) de un giro de cámara.
+      clicInicio = { x: e.clientX, y: e.clientY }
+    }
+    if (estado.editando && estado.mover) {
+      const p = punteroAlPiso(e)
+      // Los ingresos se prueban primero: son chicos y suelen quedar sobre una zona.
+      const gr = p ? gateEn(p) : null
+      if (gr && p) {
+        gateArrastrado = gr
+        sincronizarPanelGate(gr)
+        agarre.set(gr.grupo.position.x - p.x, 0, gr.grupo.position.z - p.z)
+        canvas.style.cursor = 'move'
+        canvas.setPointerCapture?.(e.pointerId)
+        return
+      }
+      const zr = p ? zonaEn(p) : null
+      if (zr && p) {
+        zonaArrastrada = zr
+        sincronizarPanel(zr)
+        agarre.set(zr.grupo.position.x - p.x, 0, zr.grupo.position.z - p.z)
+        canvas.style.cursor = 'move'
+        canvas.setPointerCapture?.(e.pointerId)
+        return
+      }
+    }
     arrastrando = true; canvas.style.cursor = 'grabbing'
     lastX = e.clientX; lastY = e.clientY
     canvas.setPointerCapture?.(e.pointerId)
   }
   function onMove(e: PointerEvent) {
+    if (gateArrastrado) {
+      const p = punteroAlPiso(e)
+      if (!p) return
+      const x = p.x + agarre.x, z = p.z + agarre.z
+      gateArrastrado.px = ajustar(((x / WORLD_W) + 0.5) * 100)
+      gateArrastrado.py = ajustar(((z / WORLD_D) + 0.5) * 100)
+      aplicarGate(gateArrastrado)
+      sincronizarPanelGate(gateArrastrado)
+      estado.sinGuardar = true
+      ultimaInteraccion = performance.now()
+      return
+    }
+    if (zonaArrastrada) {
+      const p = punteroAlPiso(e)
+      if (!p) return
+      // De coordenadas de mundo de vuelta a porcentaje del recinto, que es la
+      // unidad en la que está escrito el mapa y en la que se guarda.
+      const x = p.x + agarre.x, z = p.z + agarre.z
+      zonaArrastrada.px = ajustar(((x / WORLD_W) + 0.5) * 100)
+      zonaArrastrada.py = ajustar(((z / WORLD_D) + 0.5) * 100)
+      aplicarZona(zonaArrastrada)
+      sincronizarPanel(zonaArrastrada)
+      estado.sinGuardar = true
+      ultimaInteraccion = performance.now()
+      return
+    }
     if (!arrastrando) return
     const dx = e.clientX - lastX, dy = e.clientY - lastY
     lastX = e.clientX; lastY = e.clientY
@@ -627,7 +1297,27 @@ onMounted(async () => {
     ultimaInteraccion = performance.now()
     ocultarHint()
   }
-  function onUp() { arrastrando = false; canvas.style.cursor = 'grab' }
+  function onUp(e?: PointerEvent) {
+    // Candado cerrado + gesto corto = fue un clic: se SELECCIONA para poder
+    // editar sus campos, pero no se mueve nada. Un gesto largo era girar cámara.
+    if (estado.editando && !estado.mover && clicInicio && e) {
+      const dist = Math.hypot(e.clientX - clicInicio.x, e.clientY - clicInicio.y)
+      if (dist < 5) {
+        const p = punteroAlPiso(e)
+        const gr = p ? gateEn(p) : null
+        if (gr) sincronizarPanelGate(gr)
+        else {
+          const zr = p ? zonaEn(p) : null
+          if (zr) sincronizarPanel(zr)
+        }
+      }
+    }
+    clicInicio = null
+    zonaArrastrada = null
+    gateArrastrado = null
+    arrastrando = false
+    canvas.style.cursor = estado.editando && estado.mover ? 'crosshair' : 'grab'
+  }
   canvas.addEventListener('pointerdown', onDown)
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
@@ -654,7 +1344,7 @@ onMounted(async () => {
     const dt = Math.min(reloj.getDelta(), 0.05)
     const ahora = performance.now()
 
-    if (!reduced && !arrastrando && ahora - ultimaInteraccion > 2200) camAz += dt * 0.04
+    if (!reduced && !arrastrando && !estado.editando && ahora - ultimaInteraccion > 2200) camAz += dt * 0.04
 
     const x = centro.x + camDist * Math.sin(camPolar) * Math.sin(camAz)
     const z = centro.z + camDist * Math.sin(camPolar) * Math.cos(camAz)
@@ -662,9 +1352,9 @@ onMounted(async () => {
     camera.position.set(x, y, z)
     camera.lookAt(centro.x, 6 * ESCALA, centro.z)
 
-    GATES.forEach((g, idx) => {
+    gatesRender.forEach((g, idx) => {
       const s = 1 + Math.sin(ahora * 0.002 + idx) * 0.04
-      g.ringMesh!.scale.set(s, s, s)
+      g.ring.scale.set(s, s, s)
     })
 
     for (let pi = pulsos.length - 1; pi >= 0; pi--) {
@@ -685,8 +1375,8 @@ onMounted(async () => {
     if (activos > deseados) {
       const cand = particulas.find((p) => p.activo && p.estado === 'vagando')
       if (cand) {
-        const g2 = GATES[Math.floor(Math.random() * GATES.length)]!
-        cand.estado = 'saliendo'; cand.tx = g2.pos[0]; cand.tz = g2.pos[2]
+        const g2 = gatesRender[Math.floor(Math.random() * gatesRender.length)]!
+        cand.estado = 'saliendo'; cand.tx = g2.grupo.position.x; cand.tz = g2.grupo.position.z
       }
     }
 
@@ -792,6 +1482,122 @@ function volver() { router.back() }
     <div class="pf-vignette"></div>
     <div class="pf-grain"></div>
 
+    <!-- Panel de edición del mapa: solo visible en modo edición -->
+    <div v-if="estado.editando" class="pf-editor">
+      <div class="pf-editor-cab">
+        <strong>Editar mapa</strong>
+        <label class="pf-snap">
+          <input v-model="estado.snap" type="checkbox" />
+          Ajustar a grilla
+        </label>
+      </div>
+
+      <!-- Candado del arrastre: lo primero del panel, porque decide si un toque
+           mueve algo o solo gira la cámara. -->
+      <button
+        type="button"
+        class="pf-candado"
+        :class="{ abierto: estado.mover }"
+        @click="estado.mover = !estado.mover; puente.refrescarCursor()"
+      >
+        <span class="pf-candado-icono">{{ estado.mover ? '🔓' : '🔒' }}</span>
+        <span class="pf-candado-texto">
+          {{ estado.mover ? 'Mover bloques: ACTIVADO' : 'Bloqueado · solo navegar' }}
+        </span>
+      </button>
+      <p class="pf-editor-ayuda">
+        <template v-if="estado.mover">
+          Arrastre un bloque o un ingreso para moverlo. El piso vacío gira la cámara.
+        </template>
+        <template v-else>
+          Puede girar y acercar sin riesgo: nada se mueve. Toque un bloque para
+          seleccionarlo y editarlo por los campos.
+        </template>
+      </p>
+
+      <template v-if="estado.seleccion">
+        <div class="pf-editor-sel">
+          {{ estado.tipoSeleccion === 'ingreso' ? 'Ingreso' : 'Bloque' }}
+          <span v-if="estado.seleccionAgregada" class="pf-tag">agregado</span>
+        </div>
+
+        <!-- Nombre editable: antes un bloque nuevo quedaba como "Bloque nuevo"
+             para siempre porque no había forma de renombrarlo. -->
+        <label class="pf-campo-ancho">
+          <span>Título</span>
+          <input v-model="estado.nombre" type="text" placeholder="Sin rótulo" @change="puente.aplicarCampos()" />
+        </label>
+
+        <div class="pf-editor-campos">
+          <label>
+            <span>Horizontal</span>
+            <input v-model.number="estado.px" type="number" step="0.5" @change="puente.aplicarCampos()" />
+          </label>
+          <label>
+            <span>Vertical</span>
+            <input v-model.number="estado.py" type="number" step="0.5" @change="puente.aplicarCampos()" />
+          </label>
+          <label v-if="estado.tipoSeleccion === 'bloque'">
+            <span>Giro °</span>
+            <input v-model.number="estado.rot" type="number" step="5" @change="puente.aplicarCampos()" />
+          </label>
+        </div>
+
+        <div v-if="estado.tipoSeleccion === 'bloque'" class="pf-editor-campos">
+          <label>
+            <span>Ancho</span>
+            <input v-model.number="estado.ancho" type="number" step="0.5" min="1" @change="puente.aplicarCampos()" />
+          </label>
+          <label>
+            <span>Largo</span>
+            <input v-model.number="estado.largo" type="number" step="0.5" min="1" @change="puente.aplicarCampos()" />
+          </label>
+          <label>
+            <span>Altura</span>
+            <input v-model.number="estado.altura" type="number" step="0.5" min="0.5" @change="puente.aplicarCampos()" />
+          </label>
+        </div>
+
+        <div class="pf-editor-aspecto">
+          <label class="pf-color">
+            <span>Color</span>
+            <input v-model="estado.color" type="color" @change="puente.aplicarCampos()" />
+          </label>
+          <label v-if="estado.tipoSeleccion === 'bloque'" class="pf-rango">
+            <span>Transparencia · {{ Math.round(estado.opacidad * 100) }}%</span>
+            <input
+              v-model.number="estado.opacidad" type="range"
+              min="0" max="1" step="0.02" @change="puente.aplicarCampos()"
+            />
+          </label>
+        </div>
+      </template>
+
+      <div class="pf-editor-bloques">
+        <button type="button" class="sec" @click="puente.agregar()">+ Bloque</button>
+        <button type="button" class="sec" @click="puente.agregarIngreso()">+ Ingreso</button>
+        <button
+          v-if="estado.seleccion"
+          type="button"
+          class="sec peligro"
+          @click="puente.eliminar()"
+        >
+          Eliminar
+        </button>
+      </div>
+
+      <div class="pf-editor-acciones">
+        <button type="button" :disabled="estado.guardando || !estado.sinGuardar" @click="puente.guardar()">
+          {{ estado.guardando ? 'Guardando…' : 'Guardar' }}
+        </button>
+        <button type="button" class="sec" :disabled="!estado.sinGuardar" @click="puente.descartar()">
+          Descartar
+        </button>
+        <button type="button" class="sec" @click="puente.restaurar()">Restaurar original</button>
+      </div>
+      <p v-if="estado.sinGuardar" class="pf-editor-aviso">Hay cambios sin guardar.</p>
+    </div>
+
     <div class="pf-hud">
       <div class="pf-top">
         <div class="pf-brand">
@@ -800,6 +1606,15 @@ function volver() { router.back() }
         </div>
         <div class="pf-live">
           <button type="button" class="pf-volver" @click="volver">← Volver</button>
+          <button
+            v-if="puedeEditar"
+            type="button"
+            class="pf-volver pf-editar"
+            :class="{ activo: estado.editando }"
+            @click="estado.editando ? puente.salirEdicion() : (estado.editando = true)"
+          >
+            {{ estado.editando ? '✓ Salir de edición' : '✎ Editar mapa' }}
+          </button>
           <span class="pf-clock" id="pulso-clock">--:--:--</span>
           <span class="pf-pill" :class="{ conectando: !enVivo }">
             <span class="pf-dot"></span>{{ enVivo ? 'En vivo' : 'Conectando…' }}
@@ -930,5 +1745,96 @@ function volver() { router.back() }
 @media (prefers-reduced-motion: reduce) {
   .pulso-fexpo .pf-dot { animation: none; }
   .pulso-fexpo .pf-flash { animation: none; }
+}
+
+/* --- Panel de edición del mapa --------------------------------------- */
+/* Arriba a la izquierda, sin tapar los contadores del HUD. En pantallas
+   chicas pasa a ocupar el ancho para que los campos sigan siendo tocables. */
+.pf-editar.activo { background: rgba(60, 220, 140, .2); border-color: rgba(60, 220, 140, .6); }
+
+.pf-editor {
+  position: absolute; top: 84px; left: 16px; z-index: 6;
+  width: 260px; max-width: calc(100vw - 32px);
+  background: rgba(8, 12, 22, .88);
+  border: 1px solid rgba(120, 190, 255, .28);
+  border-radius: 12px; padding: 12px 14px;
+  color: #dbe7ff; font-size: 13px;
+  backdrop-filter: blur(6px);
+}
+.pf-editor-cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pf-candado {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 42px; padding: 8px 12px; margin-bottom: 8px;
+  border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 700;
+  letter-spacing: .03em; text-align: left;
+  /* Cerrado = gris apagado; abierto = ámbar de "ojo, esto mueve cosas". */
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(120, 190, 255, .25);
+  color: #9fb6d9;
+}
+.pf-candado:hover { background: rgba(255, 255, 255, .1); }
+.pf-candado.abierto {
+  background: rgba(255, 176, 32, .18);
+  border-color: rgba(255, 176, 32, .55);
+  color: #ffcf6b;
+}
+.pf-candado-icono { font-size: 15px; line-height: 1; }
+.pf-candado-texto { flex: 1; }
+.pf-snap { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9fb6d9; cursor: pointer; }
+.pf-snap input { width: auto; min-height: 0; margin: 0; }
+.pf-editor-ayuda { color: #9fb6d9; font-size: 12px; line-height: 1.5; margin: 0 0 10px; }
+.pf-editor-sel {
+  font-weight: 700; color: #7fe3ff; margin-bottom: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-editor-campos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.pf-editor-campos label { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.pf-editor-campos span { font-size: 10px; color: #9fb6d9; text-transform: uppercase; letter-spacing: .04em; }
+.pf-editor-campos input {
+  width: 100%; min-height: 36px; padding: 6px 8px; font-size: 13px;
+  background: rgba(255, 255, 255, .06); color: #eaf2ff;
+  border: 1px solid rgba(120, 190, 255, .25); border-radius: 7px;
+}
+.pf-tag {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: #0b1220; background: #7fe3ff; border-radius: 20px; padding: 2px 6px; margin-left: 6px;
+}
+.pf-campo-ancho { display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; }
+.pf-campo-ancho span { font-size: 10px; color: #9fb6d9; text-transform: uppercase; letter-spacing: .04em; }
+.pf-campo-ancho input {
+  width: 100%; min-height: 36px; padding: 6px 8px; font-size: 13px;
+  background: rgba(255, 255, 255, .06); color: #eaf2ff;
+  border: 1px solid rgba(120, 190, 255, .25); border-radius: 7px;
+}
+.pf-editor-aspecto { display: flex; gap: 10px; align-items: flex-end; margin: 8px 0; }
+.pf-color { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.pf-color span, .pf-rango span {
+  font-size: 10px; color: #9fb6d9; text-transform: uppercase; letter-spacing: .04em;
+}
+.pf-color input { width: 46px; height: 34px; padding: 2px; border-radius: 7px; border: 1px solid rgba(120,190,255,.25); background: transparent; }
+.pf-rango { flex: 1; display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.pf-rango input { width: 100%; }
+.pf-editor-bloques { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.pf-editor-bloques button {
+  flex: 1 1 auto; min-height: 34px; padding: 6px 10px; font-size: 12px;
+  border-radius: 8px; border: 1px solid rgba(120, 190, 255, .3);
+  background: rgba(255, 255, 255, .06); color: #eaf2ff; cursor: pointer;
+}
+.pf-editor-bloques button.peligro {
+  background: rgba(220, 60, 60, .22); border-color: rgba(255, 120, 120, .4);
+}
+.pf-editor-acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-editor-acciones button {
+  flex: 1 1 auto; min-height: 36px; padding: 7px 10px; font-size: 12px;
+  border-radius: 8px; border: 1px solid rgba(120, 190, 255, .3);
+  background: rgba(60, 160, 255, .25); color: #eaf2ff; cursor: pointer;
+}
+.pf-editor-acciones button.sec { background: rgba(255, 255, 255, .06); }
+.pf-editor-acciones button:disabled { opacity: .45; cursor: not-allowed; }
+.pf-editor-aviso { color: #ffcf6b; font-size: 12px; margin: 8px 0 0; }
+
+@media (max-width: 640px) {
+  .pf-editor { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; }
+  .pf-editor-campos input { min-height: 40px; }
 }
 </style>

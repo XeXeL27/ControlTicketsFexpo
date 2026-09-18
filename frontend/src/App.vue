@@ -16,9 +16,41 @@ const route = useRoute()
 // Qué secciones del menú ve cada rol (debe coincidir con las guardas del router).
 // - CONTROL_FERIA  → sección "Boletos de la feria" (control + estado + monitoreo).
 // - CONTROL_CONCIERTO → sección "Control de acceso" QR (validador + personas dentro).
+// - VENTA_FERIA    → sección "Venta de boletos" (marcar vendidos de su talonario).
 const esAdmin = computed(() => auth.tieneRol('ADMINISTRADOR'))
 const verConcierto = computed(() => esAdmin.value || auth.tieneRol('CONTROL_CONCIERTO'))
 const verFeria = computed(() => esAdmin.value || auth.tieneRol('CONTROL_FERIA'))
+const verVenta = computed(() => esAdmin.value || auth.tieneRol('VENTA_FERIA'))
+/**
+ * Secciones del menú que están desplegadas.
+ *
+ * Se guarda en localStorage para que cada persona conserve su menú como lo dejó:
+ * si trabaja todo el día en una sección, no quiere volver a abrirla en cada carga.
+ * Por defecto arranca abierta la sección de la ruta actual y cerradas las demás.
+ */
+const seccionesAbiertas = ref<Record<string, boolean>>({})
+
+function alternarSeccion(id: string) {
+  seccionesAbiertas.value = {
+    ...seccionesAbiertas.value,
+    [id]: !seccionesAbiertas.value[id],
+  }
+  try {
+    localStorage.setItem('menu-secciones', JSON.stringify(seccionesAbiertas.value))
+  } catch {
+    // Modo privado o almacenamiento bloqueado: el menú sigue funcionando en memoria.
+  }
+}
+
+/** Qué sección contiene la ruta actual, para abrirla sola al entrar. */
+function seccionDeRuta(path: string): string {
+  if (['/personas', '/usuarios', '/roles', '/'].includes(path)) return 'administracion'
+  if (['/estudiantes', '/administrativos', '/docentes', '/impresion', '/entrega', '/huellas'].includes(path)) return 'tickets'
+  if (['/control', '/personas-dentro', '/reportes/personas'].includes(path)) return 'concierto'
+  if (['/talonarios', '/mis-talonarios'].includes(path)) return 'venta'
+  return 'feria'
+}
+
 const esMovil = ref(false)
 const menuAbierto = ref(false)
 const botonMenu = ref<HTMLButtonElement | null>(null)
@@ -69,6 +101,17 @@ function cerrarSesion(): void {
 
 watch(() => route.fullPath, () => { menuAbierto.value = false })
 onMounted(() => {
+  // Restaura el menú como lo dejó el usuario; si no hay nada guardado, abre la
+  // sección de la pantalla en la que está.
+  try {
+    const guardado = localStorage.getItem('menu-secciones')
+    seccionesAbiertas.value = guardado
+      ? JSON.parse(guardado)
+      : { [seccionDeRuta(route.path)]: true }
+  } catch {
+    seccionesAbiertas.value = { [seccionDeRuta(route.path)]: true }
+  }
+
   mediaMovil = window.matchMedia('(max-width: 768px)')
   actualizarPantalla()
   mediaMovil.addEventListener('change', actualizarPantalla)
@@ -116,15 +159,28 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
         </div>
         <nav aria-label="Navegación principal" @click="esMovil && ($event.target as HTMLElement).closest('a') && cerrarMenu()">
           <div v-if="esAdmin" class="menu-seccion">
-            <span class="menu-seccion-titulo">Administración</span>
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.administracion" aria-controls="sec-administracion"
+              @click="alternarSeccion('administracion')">
+              <span>Administración</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.administracion }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.administracion" :id="'sec-administracion'" class="menu-enlaces">
             <router-link to="/">Inicio</router-link>
             <router-link to="/personas">Personas</router-link>
             <router-link to="/usuarios">Usuarios</router-link>
             <router-link to="/roles">Roles</router-link>
           </div>
+          </div>
 
           <div v-if="esAdmin" class="menu-seccion">
-            <span class="menu-seccion-titulo">Tickets (QR)</span>
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.tickets" aria-controls="sec-tickets"
+              @click="alternarSeccion('tickets')">
+              <span>Tickets (QR)</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.tickets }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.tickets" :id="'sec-tickets'" class="menu-enlaces">
             <router-link to="/estudiantes">Estudiantes</router-link>
             <router-link to="/administrativos">Administrativos</router-link>
             <router-link to="/docentes">Docentes</router-link>
@@ -132,20 +188,48 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/entrega">Entrega</router-link>
             <router-link to="/huellas">Huellas</router-link>
           </div>
+          </div>
 
           <div v-if="verConcierto" class="menu-seccion">
-            <span class="menu-seccion-titulo">Control de acceso (concierto)</span>
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.concierto" aria-controls="sec-concierto"
+              @click="alternarSeccion('concierto')">
+              <span>Control de acceso (concierto)</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.concierto }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.concierto" :id="'sec-concierto'" class="menu-enlaces">
             <router-link to="/control">Control de acceso</router-link>
             <router-link to="/personas-dentro">Personas dentro</router-link>
             <router-link v-if="esAdmin" to="/reportes/personas">Reporte de accesos</router-link>
           </div>
+          </div>
+
+          <div v-if="verVenta" class="menu-seccion">
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.venta" aria-controls="sec-venta"
+              @click="alternarSeccion('venta')">
+              <span>Venta de boletos</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.venta }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.venta" :id="'sec-venta'" class="menu-enlaces">
+            <router-link v-if="esAdmin" to="/talonarios">Talonarios</router-link>
+            <router-link to="/mis-talonarios">Mis talonarios</router-link>
+          </div>
+          </div>
 
           <div v-if="verFeria" class="menu-seccion">
-            <span class="menu-seccion-titulo">Boletos de la feria</span>
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.feria" aria-controls="sec-feria"
+              @click="alternarSeccion('feria')">
+              <span>Boletos de la feria</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.feria }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.feria" :id="'sec-feria'" class="menu-enlaces">
             <router-link v-if="esAdmin" to="/boletos">Boletos</router-link>
             <router-link to="/control-boletos">Control de boletos</router-link>
             <router-link to="/estado-boletos">Estado de boletos</router-link>
             <router-link to="/pulso-fexpo">Monitoreo FEXPO</router-link>
+          </div>
           </div>
         </nav>
       </aside>
@@ -195,9 +279,21 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
 /* Cada grupo del menú y su encabezado. */
 .menu-seccion { display: flex; flex-direction: column; margin-bottom: 14px; }
 .menu-seccion-titulo {
-  margin: 4px 4px 6px; color: var(--texto-suave); font-size: 11px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; margin: 4px 0 6px; padding: 8px 6px;
+  background: none; border: none; border-radius: 8px;
+  color: var(--texto-suave); font-size: 11px;
   font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  cursor: pointer; text-align: left; min-height: 40px;
 }
+.menu-seccion-titulo:hover { background: #f1f5f9; color: var(--texto); }
+/* La flecha gira al desplegar: señal visual de que la sección se puede cerrar. */
+.chevron {
+  font-size: 16px; line-height: 1; transition: transform .18s ease;
+  transform: rotate(90deg);
+}
+.chevron.abierto { transform: rotate(-90deg); }
+.menu-enlaces { display: flex; flex-direction: column; }
 @media (max-width: 768px) {
   .topbar { padding: 8px 12px; gap: 8px; }
   .marca { flex: 1; gap: 8px; }

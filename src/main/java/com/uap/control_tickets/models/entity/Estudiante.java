@@ -43,7 +43,12 @@ public class Estudiante extends AuditoriaConfig {
      * Flag rápido de "con huella": se prende al guardar el primer template en
      * huella_digital. Evita un join/EXISTS para filtrar en las pantallas.
      */
-    @Column(name = "tiene_huella", nullable = false)
+    // El "default false" es imprescindible, no decorativo: sin el, ddl-auto=update
+    // genera "add column tiene_huella boolean not null" y Postgres lo RECHAZA si la
+    // tabla ya tiene filas. La columna no se crea y todas las consultas de estudiante
+    // pasan a fallar con 500. Mismo patron que dentro/impreso/entregado en Ticket.
+    @Column(name = "tiene_huella", nullable = false,
+            columnDefinition = "boolean not null default false")
     private Boolean tieneHuella = false;
 
     @Column(name = "fecha_huella")

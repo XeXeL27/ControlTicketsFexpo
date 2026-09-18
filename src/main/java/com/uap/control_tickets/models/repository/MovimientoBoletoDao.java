@@ -17,6 +17,17 @@ public interface MovimientoBoletoDao extends JpaRepository<MovimientoBoleto, Lon
 
     long countByTipoAndEstado(TipoAcceso tipo, EstadoRegistro estado);
 
+    /** Ultimo movimiento de un boleto: sirve para saber si su 'dentro' quedo colgado de ayer. */
+    java.util.Optional<MovimientoBoleto> findTopByBoletoIdBoletoOrderByFechaHoraDesc(Long idBoleto);
+
+    /**
+     * Movimientos de un rango (el dia en curso).
+     * Los contadores del monitoreo tienen que ser DEL DIA, no del evento entero: si no,
+     * el dia 2 el tablero muestra sumados los ingresos del dia 1.
+     */
+    long countByTipoAndEstadoAndFechaHoraBetween(
+            TipoAcceso tipo, EstadoRegistro estado, Instant desde, Instant hasta);
+
     interface UltimaEntrada {
         Long getIdBoleto();
         Instant getEntrada();

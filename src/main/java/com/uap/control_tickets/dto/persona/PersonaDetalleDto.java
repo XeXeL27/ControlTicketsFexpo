@@ -17,4 +17,7 @@ public class PersonaDetalleDto {
     private String ci;
     private String genero;
     private String estado;
+
+    /** ESTUDIANTE / ADMINISTRATIVO / DOCENTE / USUARIO / SIN_VINCULO. Ver TipoPersona. */
+    private String tipo;
 }

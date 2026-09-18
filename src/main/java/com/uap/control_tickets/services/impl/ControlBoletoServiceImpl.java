@@ -10,8 +10,10 @@ import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
 import com.uap.control_tickets.models.entity.Boleto;
 import com.uap.control_tickets.models.entity.MovimientoBoleto;
+import com.uap.control_tickets.models.entity.Ticket;
 import com.uap.control_tickets.models.repository.BoletoDao;
 import com.uap.control_tickets.models.repository.MovimientoBoletoDao;
+import com.uap.control_tickets.models.repository.TicketDao;
 import com.uap.control_tickets.services.interfaces.ControlBoletoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +46,8 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
     private final BoletoDao boletoDao;
     private final MovimientoBoletoDao movimientoBoletoDao;
     private final BoletoEventosPublisher eventos;
+    private final CalendarioFeria calendario;
+    private final TicketDao ticketDao;
 
     @Override
     @Transactional
@@ -69,6 +73,37 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         dto.setDentro(boleto.isDentro());
         BoletoServiceImpl.aplicarIdentificacion(boleto, dto::setCategoria, s -> { }, dto::setNombrePersona);
         if (boleto.getDiaFeria() != null) dto.setDiaFeria(boleto.getDiaFeria().name());
+
+        // 'dentro' colgado de un dia anterior: el portador se fue sin escanear la
+        // salida, hoy esta afuera. Si no se limpia, el anti-clones lo rechaza para
+        // siempre y ademas ensucia el contador de "personas dentro".
+        if (boleto.isDentro() && esDentroVencido(boleto)) {
+            boleto.setDentro(false);
+            dto.setDentro(false);
+        }
+
+        // El boleto es de un dia puntual de la feria: solo sirve ese dia.
+        // Los boletos de venta suelta no tienen dia asignado y no se validan.
+        if (tipoMovimiento == TipoAcceso.ENTRADA && calendario.validacionActiva()
+                && boleto.getDiaFeria() != null) {
+            var hoy = calendario.diaDeHoy();
+            if (hoy == null) {
+                dto.setBloqueado(true);
+                dto.setMotivo("FUERA_DE_FECHA");
+                dto.setMensaje("Hoy no es un día de la feria. Este boleto es para el "
+                        + calendario.describir(boleto.getDiaFeria()) + ".");
+                eventos.publicar(evento("BLOQUEADO", cod, "FUERA_DE_FECHA", boleto));
+                return dto;
+            }
+            if (hoy != boleto.getDiaFeria()) {
+                dto.setBloqueado(true);
+                dto.setMotivo("DIA_INCORRECTO");
+                dto.setMensaje("Este boleto es para el " + calendario.describir(boleto.getDiaFeria())
+                        + " y hoy es " + calendario.describir(hoy) + ".");
+                eventos.publicar(evento("BLOQUEADO", cod, "DIA_INCORRECTO", boleto));
+                return dto;
+            }
+        }
 
         // Anti-clones: el escaner es dedicado, el estado tiene que coincidir.
         if (tipoMovimiento == TipoAcceso.ENTRADA && boleto.isDentro()) {
@@ -134,11 +169,53 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         r.setTotalBoletos(boletoDao.countByEstado(EstadoRegistro.ACTIVO));
         r.setIngresosTotal(movimientoBoletoDao.countByTipoAndEstado(TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO));
         r.setSalidasTotal(movimientoBoletoDao.countByTipoAndEstado(TipoAcceso.SALIDA, EstadoRegistro.ACTIVO));
+
+        // Contadores del DIA EN CURSO (el tablero en vivo no debe sumar los dias previos).
+        var hoy = calendario.hoy();
+        Instant desde = hoy.atStartOfDay(calendario.zona()).toInstant();
+        Instant hasta = hoy.plusDays(1).atStartOfDay(calendario.zona()).toInstant();
+        r.setIngresosHoy(movimientoBoletoDao.countByTipoAndEstadoAndFechaHoraBetween(
+                TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO, desde, hasta));
+        r.setSalidasHoy(movimientoBoletoDao.countByTipoAndEstadoAndFechaHoraBetween(
+                TipoAcceso.SALIDA, EstadoRegistro.ACTIVO, desde, hasta));
+        var dia = calendario.diaDeHoy();
+        r.setDiaHoy(dia == null ? null : dia.name());
+        r.setFechaHoy(hoy.toString());
         // Desglose por categoría, para el monitoreo (Pulso FEXPO).
         r.setDentroAdministrativos(boletoDao.countByDentroTrueAndEstadoAndAdministrativoIsNotNull(EstadoRegistro.ACTIVO));
         r.setDentroDocentes(boletoDao.countByDentroTrueAndEstadoAndDocenteIsNotNull(EstadoRegistro.ACTIVO));
         r.setDentroParticulares(boletoDao.countByDentroTrueAndEstadoAndAdministrativoIsNullAndDocenteIsNull(EstadoRegistro.ACTIVO));
         return r;
+    }
+
+    /** ¿El 'dentro' de este boleto quedo colgado de un dia anterior? */
+    private boolean esDentroVencido(Boleto boleto) {
+        return movimientoBoletoDao
+                .findTopByBoletoIdBoletoOrderByFechaHoraDesc(boleto.getIdBoleto())
+                .map(m -> calendario.esDeUnDiaAnterior(m.getFechaHora()))
+                // dentro=true sin ningun movimiento es un estado incoherente: se limpia.
+                .orElse(true);
+    }
+
+    @Override
+    @Transactional
+    public int cerrarJornada() {
+        int n = 0;
+        List<Boleto> dentro = boletoDao.findAllByEstado(EstadoRegistro.ACTIVO).stream()
+                .filter(Boleto::isDentro).toList();
+        for (Boleto b : dentro) b.setDentro(false);
+        boletoDao.saveAll(dentro);
+        n += dentro.size();
+
+        List<Ticket> tickets = ticketDao.findAllByDentroTrueAndEstado(EstadoRegistro.ACTIVO);
+        for (Ticket t : tickets) t.setDentro(false);
+        ticketDao.saveAll(tickets);
+        n += tickets.size();
+
+        log.info("Cierre de jornada: {} boletos y {} tickets quedaron fuera.",
+                dentro.size(), tickets.size());
+        eventos.publicar(evento("CIERRE_JORNADA", "", null, null));
+        return n;
     }
 
     private EventoBoletoDto evento(String tipo, String codigo, String motivo, Boleto boleto) {

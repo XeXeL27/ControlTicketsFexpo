@@ -18,4 +18,16 @@ public class ResumenBoletosDto {
     private long dentroParticulares;
     private long dentroAdministrativos;
     private long dentroDocentes;
+
+    // --- Del DIA EN CURSO ---
+    // Los "Total" de arriba son acumulados de toda la feria; estos son solo de hoy,
+    // que es lo que tiene que mostrar el tablero en vivo.
+    /** Ingresos registrados hoy. */
+    private long ingresosHoy;
+    /** Salidas registradas hoy. */
+    private long salidasHoy;
+    /** Que dia del evento es hoy (DIA_1/2/3), o null si hoy no es dia de feria. */
+    private String diaHoy;
+    /** Fecha de hoy segun la zona del evento (ISO), para que el tablero la muestre. */
+    private String fechaHoy;
 }

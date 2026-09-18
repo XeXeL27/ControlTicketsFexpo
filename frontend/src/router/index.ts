@@ -29,6 +29,10 @@ import ControlValidador from '@/views/control/ControlValidador.vue'
 import PersonasDentro from '@/views/control/PersonasDentro.vue'
 import ReportePersonas from '@/views/control/ReportePersonas.vue'
 
+// --- Venta de boletos por talonario (feria) ---
+import Talonarios from '@/views/Talonarios.vue'
+import MisTalonarios from '@/views/MisTalonarios.vue'
+
 // --- Boletos de la feria (entrada al recinto por código, sin QR: carga,
 // validación y monitoreo en vivo — dominio aparte del ticket QR de arriba) ---
 import Boletos from '@/views/Boletos.vue'
@@ -43,6 +47,7 @@ import PulsoFexpo from '@/views/control/PulsoFexpo.vue'
 // - CONTROL_CONCIERTO → control de acceso QR (validador + personas dentro).
 const ADMIN = ['ADMINISTRADOR']
 const FERIA = ['ADMINISTRADOR', 'CONTROL_FERIA'] // control de boletos, estado y monitoreo
+const VENTA = ['ADMINISTRADOR', 'VENTA_FERIA'] // control de venta por talonario
 const CONCIERTO = ['ADMINISTRADOR', 'CONTROL_CONCIERTO'] // control de acceso QR y personas dentro
 
 const routes: RouteRecordRaw[] = [
@@ -70,6 +75,11 @@ const routes: RouteRecordRaw[] = [
   { path: '/personas-dentro', component: PersonasDentro, meta: { roles: CONCIERTO } },
   { path: '/reportes/personas', component: ReportePersonas, meta: { roles: ADMIN } },
 
+  // Venta de boletos por talonario. La administración es del ADMINISTRADOR;
+  // cada vendedora marca los suyos en /mis-talonarios.
+  { path: '/talonarios', component: Talonarios, meta: { roles: ADMIN } },
+  { path: '/mis-talonarios', component: MisTalonarios, meta: { roles: VENTA } },
+
   // Boletos de la feria (CONTROL_FERIA). La carga CSV queda solo ADMINISTRADOR.
   { path: '/boletos', component: Boletos, meta: { roles: ADMIN } },
   { path: '/control-boletos', component: ControlBoletos, meta: { roles: FERIA } },
@@ -83,11 +93,22 @@ const router = createRouter({
 })
 
 /** La ruta "inicio" de cada rol: admin al dashboard, control a su validación. */
+/**
+ * A dónde mandar a cada rol cuando entra o cuando pisa una ruta que no le toca.
+ *
+ * OJO: todo rol nuevo TIENE que figurar acá. El fallback no puede ser '/' porque
+ * esa ruta es solo de ADMINISTRADOR: un rol sin entrada propia entraría en bucle
+ * (la guarda lo saca de '/' y lo manda a rutaInicio(), que devuelve '/'...).
+ * Por eso el último recurso cierra la sesión en vez de redirigir.
+ */
 export function rutaInicio(): string {
   if (auth.tieneRol('ADMINISTRADOR')) return '/'
+  if (auth.tieneRol('VENTA_FERIA')) return '/mis-talonarios'
   if (auth.tieneRol('CONTROL_FERIA')) return '/control-boletos'
   if (auth.tieneRol('CONTROL_CONCIERTO')) return '/control'
-  return '/'
+  // Rol sin pantalla asignada: se cierra sesión para no quedar en bucle.
+  auth.logout()
+  return '/login'
 }
 
 // Guard global: exige sesión, y además que el rol tenga permitido el destino.
