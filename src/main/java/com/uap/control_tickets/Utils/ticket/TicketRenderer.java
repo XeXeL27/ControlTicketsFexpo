@@ -289,6 +289,38 @@ public class TicketRenderer {
         }
     }
 
+    /**
+     * Ticket administrativo suelto (PNG): el mismo reverso del pliego, en la
+     * MISMA medida que la grupal (ADMINISTRATIVO_5: 20.8 x 7.42 cm).
+     */
+    public byte[] pngAdministrativo(DatosTicketAdministrativo datos) {
+        return aPng(renderAdministrativo(datos, FormatoPliego.ADMINISTRATIVO_5));
+    }
+
+    /**
+     * Ticket administrativo suelto (PDF de una página, medida del pliego).
+     * Sale GIRADO 90° (vertical: 7.42 de ancho x 20.8 de alto) para que a la
+     * impresora entre el lado angosto primero.
+     */
+    public byte[] pdfAdministrativo(DatosTicketAdministrativo datos) {
+        FormatoPliego formato = FormatoPliego.ADMINISTRATIVO_5;
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Document doc = new Document(new Rectangle(pt(formato.getAltoCm()), pt(formato.getLargoCm())),
+                    0, 0, 0, 0);
+            PdfWriter.getInstance(doc, out);
+            doc.open();
+            Image imagen = Image.getInstance(pngAdministrativo(datos));
+            imagen.setRotationDegrees(90);
+            imagen.scaleAbsolute(pt(formato.getAltoCm()), pt(formato.getLargoCm()));
+            imagen.setAbsolutePosition(0, 0);
+            doc.add(imagen);
+            doc.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo generar el ticket administrativo: " + e.getMessage());
+        }
+    }
+
     private byte[] aPng(BufferedImage imagen) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             ImageIO.write(imagen, "PNG", out);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Pantalla de Administrativos: importar CSV (dropzone), listar (TablaDatos), crear,
-// emitir tickets (uno o los que falten) y ver QR.
-// Nota: aún no hay plantilla de ticket de administrativo, así que "ver" muestra el QR.
+// emitir tickets (uno o los que falten) e imprimir uno por uno (reverso con
+// datos + QR, misma medida que el pliego grupal).
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import ModalBase from '@/components/ModalBase.vue'
@@ -19,7 +19,7 @@ import {
   listarAdministrativos,
   previsualizarAdministrativosCsv,
 } from '@/api/administrativo.service'
-import { emitirTicketAdministrativo, obtenerTicketQr } from '@/api/ticket.service'
+import { emitirTicketAdministrativo, obtenerTicketPdf, obtenerTicketPng, obtenerTicketQr } from '@/api/ticket.service'
 import type {
   AdministrativoDetalleDto,
   AdministrativoDto,
@@ -58,6 +58,10 @@ const errorForm = ref('')
 const mostrarQr = ref(false)
 const qrUrl = ref('')
 const codigoActual = ref('')
+// Modal imprimir (ticket individual, misma medida que el pliego)
+const mostrarTicket = ref(false)
+const ticketUrl = ref('')
+const ticketIdActual = ref<number | null>(null)
 
 const columnas: ColumnaTabla[] = [
   { clave: 'codigoAdministrativo', titulo: 'Código adm.', ancho: '140px' },
@@ -281,6 +285,48 @@ function liberar() {
   }
 }
 
+/** Muestra el ticket individual (PNG) en el modal, listo para imprimir. */
+async function verTicket(a: AdministrativoDetalleDto) {
+  if (!a.idTicket) return
+  try {
+    const blob = await obtenerTicketPng(a.idTicket)
+    liberarTicket()
+    ticketUrl.value = URL.createObjectURL(blob)
+    ticketIdActual.value = a.idTicket
+    codigoActual.value = a.codigoTicket || ''
+    mostrarTicket.value = true
+  } catch (e) {
+    alertas.error(mensajeError(e, 'Error al obtener el ticket'))
+  }
+}
+
+/** Descarga el ticket individual en PDF (medida del pliego grupal). */
+async function descargarPdf() {
+  if (!ticketIdActual.value) return
+  try {
+    const blob = await obtenerTicketPdf(ticketIdActual.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ticket-${ticketIdActual.value}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alertas.error(mensajeError(e, 'Error al descargar el PDF'))
+  }
+}
+
+function cerrarTicket() {
+  mostrarTicket.value = false
+  liberarTicket()
+}
+function liberarTicket() {
+  if (ticketUrl.value) {
+    URL.revokeObjectURL(ticketUrl.value)
+    ticketUrl.value = ''
+  }
+}
+
 onMounted(cargar)
 </script>
 
@@ -448,7 +494,7 @@ onMounted(cargar)
 
       <template #acciones="{ fila }">
         <button v-if="!fila.idTicket" @click="emitir(fila)">Emitir ticket</button>
-        <button v-else class="secundario" @click="verQr(fila)">Ver QR</button>
+        <button v-else @click="verTicket(fila)">Imprimir</button>
         <button class="secundario" :disabled="cambiandoTipo || emitiendo" @click="abrirCambio(fila)">Cambiar a docente</button>
         <button class="peligro" @click="eliminar(fila)">Eliminar</button>
       </template>
@@ -507,6 +553,15 @@ onMounted(cargar)
       </div>
       <template #pie>
         <button class="secundario" @click="cerrarQr">Cerrar</button>
+      </template>
+    </ModalBase>
+
+    <!-- Modal imprimir: ticket individual, misma medida que el pliego grupal -->
+    <ModalBase v-if="mostrarTicket" :titulo="`Ticket ${codigoActual}`" ancho="auto" @cerrar="cerrarTicket">
+      <img :src="ticketUrl" alt="Ticket administrativo con datos y QR" style="width:100%;height:auto" />
+      <template #pie>
+        <button class="secundario" @click="cerrarTicket">Cerrar</button>
+        <button @click="descargarPdf">Descargar PDF</button>
       </template>
     </ModalBase>
   </div>

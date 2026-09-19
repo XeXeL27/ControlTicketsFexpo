@@ -272,9 +272,7 @@ public class TicketServiceImpl implements TicketService {
         byte[] pdf;
         if (categoria == CategoriaTicket.ADMINISTRATIVO) {
             List<DatosTicketAdministrativo> datos = candidatos.stream()
-                    .map(t -> new DatosTicketAdministrativo(t.getPersona().getNombreCompleto(),
-                            t.getPersona().getCi(), t.getAdministrativo().getCodigoAdministrativo(),
-                            t.getQrToken()))
+                    .map(this::datosAdministrativo)
                     .toList();
             pdf = ticketRenderer.pdfPliegoAdministrativos(datos, formato);
         } else if (categoria == CategoriaTicket.DOCENTE) {
@@ -379,6 +377,9 @@ public class TicketServiceImpl implements TicketService {
     @Transactional(readOnly = true)
     public byte[] renderPng(Long idTicket) {
         Ticket ticket = buscarActivo(idTicket);
+        if (ticket.getCategoria() == CategoriaTicket.ADMINISTRATIVO) {
+            return ticketRenderer.pngAdministrativo(datosAdministrativo(ticket));
+        }
         if (ticket.getCategoria() == CategoriaTicket.DOCENTE) {
             return ticketRenderer.pngDocente(datosDocente(ticket));
         }
@@ -389,6 +390,9 @@ public class TicketServiceImpl implements TicketService {
     @Transactional(readOnly = true)
     public byte[] renderPdf(Long idTicket) {
         Ticket ticket = buscarActivo(idTicket);
+        if (ticket.getCategoria() == CategoriaTicket.ADMINISTRATIVO) {
+            return ticketRenderer.pdfAdministrativo(datosAdministrativo(ticket));
+        }
         if (ticket.getCategoria() == CategoriaTicket.DOCENTE) {
             return ticketRenderer.pdfDocente(datosDocente(ticket));
         }
@@ -411,6 +415,17 @@ public class TicketServiceImpl implements TicketService {
         return new DatosTicketDocente(t.getPersona().getNombreCompleto(), t.getPersona().getCi(),
                 t.getDocente().getCodigoDocente(), t.getDocente().getCarrera(),
                 t.getCodigoIdentificacion(), t.getQrToken());
+    }
+
+    /** Arma los datos a imprimir a partir del ticket de administrativo. */
+    private DatosTicketAdministrativo datosAdministrativo(Ticket t) {
+        if (t.getCategoria() != CategoriaTicket.ADMINISTRATIVO || t.getAdministrativo() == null) {
+            throw new NegocioException(
+                    "Este ticket no es de administrativo (es " + t.getCategoria() + ")");
+        }
+        return new DatosTicketAdministrativo(t.getPersona().getNombreCompleto(),
+                t.getPersona().getCi(), t.getAdministrativo().getCodigoAdministrativo(),
+                t.getQrToken());
     }
 
     /** Arma los datos a imprimir a partir del ticket de estudiante. */
