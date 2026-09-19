@@ -32,8 +32,10 @@ import java.util.List;
  *  2. Determina internamente la categoria y los datos de la persona (BD local).
  *  3. Anti-clones: ENTRADA estando dentro, o SALIDA estando fuera, se rechazan
  *     con 409 + motivo (no se registra nada).
- *  4. Solo al ENTRAR un estudiante: valida la matricula con el RU; si no esta
- *     matriculado bloquea el ingreso (no persiste).
+ *  4. Solo al ENTRAR un estudiante: valida la matricula con el RU. Solo una
+ *     respuesta EXPLICITA de no-matriculado bloquea; si SIGSE no responde a
+ *     tiempo se deja entrar con los datos locales (fail-open, la fila manda)
+ *     y se avisa en el mensaje + log.
  *  5. Registra el movimiento (por el escaner dedicado) y actualiza el flag
  *     Ticket.dentro.
  *
@@ -91,7 +93,12 @@ public class ControlServiceImpl implements ControlService {
             return dto;
         }
 
-        // Matricula: solo estudiantes al ENTRAR. Determina si el ingreso esta permitido.
+        // Matricula: solo estudiantes al ENTRAR.
+        //  - SIGSE dice NO matriculado (respuesta explícita) → se bloquea.
+        //  - SIGSE no responde (lento o caído) → se DEJA ENTRAR con los datos
+        //    locales y se avisa en el mensaje. En la puerta la fila no puede
+        //    esperar: frenar a todos porque el sistema externo tarda es peor
+        //    que dejar pasar a uno con el ticket válido de la BD local.
         if (tipoMovimiento == TipoAcceso.ENTRADA
                 && ticket.getCategoria() == CategoriaTicket.ESTUDIANTE) {
             ApiResponseDto sigse = consultarSigse(dto.getRu());
@@ -99,12 +106,16 @@ public class ControlServiceImpl implements ControlService {
             dto.setMatriculado(sigse != null && sigse.getData() != null
                     ? sigse.getData().isEstadoMatriculacion() : null);
 
-            // Entrada bloqueada si no se puede confirmar la matricula.
-            if (!Boolean.TRUE.equals(dto.getMatriculado())) {
+            if (Boolean.FALSE.equals(dto.getMatriculado())) {
                 dto.setBloqueado(true);
                 dto.setMotivo("NO_MATRICULADO");
-                dto.setMensaje("Estudiante no matriculado (o sin confirmacion de matricula). No se permite el ingreso.");
+                dto.setMensaje("Estudiante no matriculado. No se permite el ingreso.");
                 return dto;
+            }
+            if (dto.getMatriculado() == null) {
+                log.warn("SIGSE sin respuesta para RU {}: ingreso con datos locales", dto.getRu());
+                dto.setMensaje("Ingreso validado con datos locales "
+                        + "(el sistema de matrícula no respondió a tiempo).");
             }
         }
 

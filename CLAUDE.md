@@ -207,8 +207,10 @@ Hecho:
   > venta (`talonario`/`boleto_talonario`), feria (`boleto`/`movimiento_boleto`)
   > y concierto (`ticket`/`acceso`).
   - Solo **ESTUDIANTE al ENTRAR** consulta la matrícula en **SIGSE** (API externa de
-    la UAP); si no está matriculado → 409 `NO_MATRICULADO`. Si SIGSE no responde →
-    `NegocioException` (400): la entrada queda bloqueada. La SALIDA no consulta SIGSE.
+    la UAP, timeouts 3s conexión + 5s lectura). Solo una respuesta EXPLÍCITA de no
+    matriculado bloquea (409 `NO_MATRICULADO`); si SIGSE no responde a tiempo se
+    **deja entrar con los datos locales** (fail-open: la fila no espera) y se avisa
+    en `mensaje` + log. La SALIDA no consulta SIGSE.
   - Si pasa: `Ticket.dentro` = (tipo == ENTRADA) + fila en `Acceso`.
   - Integración SIGSE en el paquete **`apivalidacaion`** (sic, así se llama):
     `ApiService` hace POST con header `x-api-key` a `sigse.url`/`sigse.api-key`
