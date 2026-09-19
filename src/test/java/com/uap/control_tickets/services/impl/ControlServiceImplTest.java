@@ -86,19 +86,20 @@ class ControlServiceImplTest {
     }
 
     @Test
-    void sinConfirmacionSigseNoEntraPeroPuedeSalir() {
+    void sinConfirmacionSigseEntraConDatosLocales() {
         Ticket ticket = ticket(CategoriaTicket.ESTUDIANTE, false);
         when(ticketDao.buscarParaControl("qr")).thenReturn(Optional.of(ticket));
         when(api.informacion(123)).thenReturn(null);
         var resultado = service.validar("qr", TipoAcceso.ENTRADA);
-        assertTrue(resultado.isBloqueado());
+        // Fail-open: sin respuesta de SIGSE se entra igual y se avisa.
+        assertFalse(resultado.isBloqueado());
         assertNull(resultado.getMatriculado());
-        assertFalse(ticket.isDentro());
-        verify(accesoDao, never()).save(any());
-        ticket.setDentro(true);
+        assertTrue(resultado.getMensaje() != null && resultado.getMensaje().contains("datos locales"));
+        assertTrue(ticket.isDentro());
+        verify(accesoDao).save(any());
+        // Y después puede salir normal.
         ultimoMovimientoHoy();
         assertFalse(service.validar("qr", TipoAcceso.SALIDA).isDentro());
-        verify(accesoDao).save(any());
     }
 
     @Test
