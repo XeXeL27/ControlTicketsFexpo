@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ControlTickets</string>
+    <string name="title_activity_main">ControlTickets</string>
+    <string name="package_name">com.uap.controltickets</string>
+    <string name="custom_url_scheme">com.uap.controltickets</string>
+</resources>

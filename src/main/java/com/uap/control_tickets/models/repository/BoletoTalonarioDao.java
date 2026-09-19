@@ -1,5 +1,6 @@
 package com.uap.control_tickets.models.repository;
 
+import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.enums.EstadoVenta;
 import com.uap.control_tickets.enums.TipoTalonario;
@@ -19,6 +20,21 @@ public interface BoletoTalonarioDao extends JpaRepository<BoletoTalonario, Long>
             Long idTalonario, EstadoRegistro estado);
 
     Optional<BoletoTalonario> findByTalonarioIdTalonarioAndNumero(Long idTalonario, Integer numero);
+
+    /**
+     * El boleto N del par (destino, tipo), para la puerta: como los rangos no se
+     * solapan dentro del mismo par, el número identifica un solo boleto (si la
+     * regla se violó a mano, viene más de uno y la puerta toma el primero).
+     */
+    @Query("""
+            select b from BoletoTalonario b
+            where b.talonario.destino = :destino and b.talonario.tipo = :tipo
+              and b.numero = :numero and b.estado = :estado and b.talonario.estado = :estado
+            """)
+    List<BoletoTalonario> buscarParaPuerta(@Param("destino") DestinoTalonario destino,
+                                           @Param("tipo") TipoTalonario tipo,
+                                           @Param("numero") Integer numero,
+                                           @Param("estado") EstadoRegistro estado);
 
     /** Los boletos de un rango dentro del talonario (para marcar de a tandas). */
     List<BoletoTalonario> findAllByTalonarioIdTalonarioAndNumeroBetweenAndEstadoOrderByNumeroAsc(

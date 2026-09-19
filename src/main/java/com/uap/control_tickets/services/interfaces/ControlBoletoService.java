@@ -4,27 +4,30 @@ import com.uap.control_tickets.dto.control.BoletoDentroDto;
 import com.uap.control_tickets.dto.control.ResumenBoletosDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
 import com.uap.control_tickets.enums.TipoAcceso;
+import com.uap.control_tickets.enums.TipoBoleto;
 
 import java.util.List;
 
 /**
- * Validador de boletos de la feria: escaneo/tipeo del código con escáner dedicado
- * de ENTRADA o SALIDA. Registra el movimiento y rechaza intentos duplicados
- * (entrar estando dentro o salir estando fuera). Mismo patrón que
- * {@link ControlService}, sin la parte de matrícula (los boletos son anónimos).
+ * Validador de boletos: escaneo/tipeo del código con escáner dedicado
+ * de ENTRADA o SALIDA, DENTRO de un tipo de boleto (FERIA o PARQUEO). Registra
+ * el movimiento y rechaza intentos duplicados (entrar estando dentro o salir
+ * estando fuera). Mismo patrón que {@link ControlService}, sin la parte de
+ * matrícula (los boletos son anónimos).
  */
 public interface ControlBoletoService {
 
     /**
-     * Valida el código para el escáner indicado.
+     * Valida el código para el escáner indicado, dentro del tipo indicado.
      *
      * Reglas:
-     *  - Código inexistente → 404 (no válido).
+     *  - Código inexistente EN ESE TIPO → 404 (no válido). El mismo código
+     *    puede existir en el otro tipo y es otro boleto.
      *  - ENTRADA estando dentro → 409 con motivo YA_DENTRO.
      *  - SALIDA estando fuera → 409 con motivo YA_FUERA.
      * En los casos bloqueados no se registra el movimiento ni se toca la BD.
      */
-    ValidacionBoletoDto validar(String codigo, TipoAcceso tipoMovimiento);
+    ValidacionBoletoDto validar(String codigo, TipoAcceso tipoMovimiento, TipoBoleto tipoBoleto);
 
     /** Boletos actualmente dentro del recinto. */
     List<BoletoDentroDto> boletosDentro();

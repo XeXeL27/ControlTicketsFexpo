@@ -2,6 +2,7 @@ package com.uap.control_tickets.models.entity;
 
 import com.uap.control_tickets.config.AuditoriaConfig;
 import com.uap.control_tickets.enums.DiaFeria;
+import com.uap.control_tickets.enums.TipoBoleto;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -19,7 +20,10 @@ import lombok.Setter;
  * historial completo de entradas/salidas queda en {@link MovimientoBoleto}.
  */
 @Entity
-@Table(name = "boleto")
+@Table(name = "boleto", uniqueConstraints =
+        // El código se repite entre tipos (el 137 de feria y el 137 de parqueo
+        // son dos boletos distintos): lo único es el par (tipo, codigo).
+        @UniqueConstraint(name = "boleto_tipo_codigo_unique", columnNames = { "tipo", "codigo" }))
 @Getter
 @Setter
 public class Boleto extends AuditoriaConfig {
@@ -29,8 +33,16 @@ public class Boleto extends AuditoriaConfig {
     @Column(name = "id_boleto")
     private Long idBoleto;
 
-    @Column(name = "codigo", nullable = false, unique = true, length = 40)
+    @Column(name = "codigo", nullable = false, length = 40)
     private String codigo;
+
+    /**
+     * A qué da ingreso (FERIA o PARQUEO). Los ya cargados son todos FERIA
+     * (ver migración en CLAUDE.md §8.2.2).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tipo", nullable = false, length = 20)
+    private TipoBoleto tipo = TipoBoleto.FERIA;
 
     /** Estado actual: true = el portador esta dentro del recinto. */
     @Column(name = "dentro", nullable = false, columnDefinition = "boolean not null default false")

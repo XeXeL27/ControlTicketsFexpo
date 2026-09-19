@@ -36,6 +36,8 @@ public class PrevisualizacionBoletoCsvDto {
         private String codigo;
         /** Día en que vale el boleto (DIA_1/2/3). Vacío = falta en el archivo. */
         private String diaFeria;
+        /** FERIA o PARQUEO (lo que se va a guardar; vacío en el archivo = FERIA). */
+        private String tipo;
         /** "NUEVO", "YA_EXISTE" o el motivo por el que fallaria. */
         private String estado;
     }

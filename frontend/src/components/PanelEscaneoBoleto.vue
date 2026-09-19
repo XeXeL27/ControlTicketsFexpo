@@ -26,12 +26,14 @@ import { mensajeError } from '@/utils/errores'
 import { fotoDeRegistro, registrarSalida, validarBoleto } from '@/api/control-boleto.service'
 import { comprimirFoto, pesoKb } from '@/utils/foto'
 import type { TipoMovimiento } from '@/types/control.type'
-import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
-import type { ValidacionBoletoDto } from '@/types/boleto.type'
+import { ETIQUETA_DIA_FERIA, ETIQUETA_TIPO_BOLETO } from '@/types/boleto.type'
+import type { TipoBoleto, ValidacionBoletoDto } from '@/types/boleto.type'
 
 const props = defineProps<{
   /** ENTRADA o SALIDA. Es un escaner dedicado. */
   tipo: TipoMovimiento
+  /** FERIA o PARQUEO. El código solo se busca dentro de este tipo. */
+  tipoBoleto: TipoBoleto
   /** Titulo del panel (ej: "Entrada"). */
   titulo?: string
 }>()
@@ -193,9 +195,9 @@ async function procesar(codigo: string): Promise<void> {
   mostrarAviso.value = false
 
   try {
-    const dto = await validarBoleto(codigo, props.tipo)
+    const dto = await validarBoleto(codigo, props.tipo, props.tipoBoleto)
     resultado.value = dto
-    alertas.exito(`${props.tipo} registrada (${dto.codigo})`)
+    alertas.exito(`${props.tipo} registrada (${ETIQUETA_TIPO_BOLETO[props.tipoBoleto]} ${dto.codigo})`)
   } catch (e) {
     // 409 = movimiento rechazado (duplicado): el cuerpo trae el ValidacionBoletoDto.
     if (axios.isAxiosError(e) && e.response?.status === 409) {
@@ -289,6 +291,9 @@ defineExpose({ limpiar })
         <span v-if="resultado.bloqueado" class="resultado-titulo">DENEGADO</span>
         <span v-else class="resultado-titulo">{{ tipo }}</span>
         <span class="resultado-codigo">{{ resultado.codigo }}</span>
+        <span v-if="resultado.tipo" class="resultado-subtipo">
+          {{ ETIQUETA_TIPO_BOLETO[resultado.tipo] ?? resultado.tipo }}
+        </span>
       </div>
 
       <!-- Boleto asociado a un administrativo/docente: quién es, bien visible. -->
@@ -518,6 +523,8 @@ defineExpose({ limpiar })
   font-family: monospace; font-size: 15px; font-weight: 700;
   background: rgba(255,255,255,.6); padding: 3px 12px; border-radius: 999px;
 }
+/* En qué bolsa se validó (feria/parqueo): confirma que fue contra el tipo correcto. */
+.resultado-subtipo { font-size: 12px; font-weight: 700; opacity: .75; text-transform: uppercase; letter-spacing: .05em; }
 
 .motivo { font-size: 13.5px; color: var(--texto-suave); margin: 6px 0; text-align: center; }
 

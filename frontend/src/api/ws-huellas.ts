@@ -8,7 +8,10 @@ import { Client, type IMessage } from '@stomp/stompjs'
 import { auth } from '@/store/auth'
 import type { ProgresoHuellaDto } from '@/types/huella.type'
 
+/** Igual que ws-boletos.ts: VITE_WS_URL en el APK, location.host en web. */
 function urlWs(): string {
+  const base = import.meta.env.VITE_WS_URL
+  if (base) return `${base}/ws`
   const protocolo = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocolo}//${location.host}/ws`
 }

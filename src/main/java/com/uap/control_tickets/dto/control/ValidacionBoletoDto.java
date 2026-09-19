@@ -11,6 +11,9 @@ public class ValidacionBoletoDto {
     private Long idBoleto;
     private String codigo;
 
+    /** FERIA o PARQUEO: la bolsa donde se validó este código. */
+    private String tipo;
+
     /** true = el boleto quedo dentro del recinto tras esta validación. */
     private boolean dentro;
 

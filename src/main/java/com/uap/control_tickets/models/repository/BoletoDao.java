@@ -1,6 +1,7 @@
 package com.uap.control_tickets.models.repository;
 
 import com.uap.control_tickets.enums.EstadoRegistro;
+import com.uap.control_tickets.enums.TipoBoleto;
 import com.uap.control_tickets.models.entity.Boleto;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -11,7 +12,8 @@ public interface BoletoDao extends JpaRepository<Boleto, Long> {
 
     List<Boleto> findAllByEstado(EstadoRegistro estado);
 
-    Optional<Boleto> findByCodigo(String codigo);
+    /** El código solo identifica dentro de su tipo (puede repetirse entre tipos). */
+    Optional<Boleto> findByTipoAndCodigo(TipoBoleto tipo, String codigo);
 
     long countByEstado(EstadoRegistro estado);
 

@@ -6,6 +6,7 @@ import com.uap.control_tickets.dto.control.ResumenBoletosDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.enums.TipoAcceso;
+import com.uap.control_tickets.enums.TipoBoleto;
 import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
 import com.uap.control_tickets.models.entity.Boleto;
@@ -60,7 +61,7 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
 
     @Override
     @Transactional
-    public ValidacionBoletoDto validar(String codigo, TipoAcceso tipoMovimiento) {
+    public ValidacionBoletoDto validar(String codigo, TipoAcceso tipoMovimiento, TipoBoleto tipoBoleto) {
         String cod = codigo == null ? "" : codigo.trim();
         if (cod.isEmpty()) {
             throw new NegocioException("Ingrese el codigo del boleto");
@@ -68,17 +69,22 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         if (tipoMovimiento == null) {
             throw new NegocioException("Indique el tipo de movimiento (ENTRADA o SALIDA)");
         }
+        if (tipoBoleto == null) {
+            throw new NegocioException("Indique el tipo de boleto (FERIA o PARQUEO)");
+        }
 
-        Boleto boleto = boletoDao.findByCodigo(cod)
+        Boleto boleto = boletoDao.findByTipoAndCodigo(tipoBoleto, cod)
                 .filter(b -> b.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseGet(() -> {
                     eventos.publicar(evento("NO_VALIDO", cod, "NO_VALIDO", null));
-                    throw new RecursoNoEncontradoException("Boleto no encontrado o no valido: " + cod);
+                    throw new RecursoNoEncontradoException(
+                            "Boleto no encontrado en " + tipoBoleto.etiqueta() + ": " + cod);
                 });
 
         ValidacionBoletoDto dto = new ValidacionBoletoDto();
         dto.setIdBoleto(boleto.getIdBoleto());
         dto.setCodigo(boleto.getCodigo());
+        dto.setTipo(boleto.getTipo().name());
         dto.setDentro(boleto.isDentro());
         BoletoServiceImpl.aplicarIdentificacion(boleto, dto::setCategoria, s -> { }, dto::setNombrePersona);
         if (boleto.getDiaFeria() != null) dto.setDiaFeria(boleto.getDiaFeria().name());
@@ -174,6 +180,7 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
                     BoletoDentroDto dto = new BoletoDentroDto();
                     dto.setIdBoleto(b.getIdBoleto());
                     dto.setCodigo(b.getCodigo());
+                    if (b.getTipo() != null) dto.setTipo(b.getTipo().name());
                     dto.setEntrada(entradas.get(b.getIdBoleto()));
                     BoletoServiceImpl.aplicarIdentificacion(b, dto::setCategoria, s -> { }, dto::setNombrePersona);
                     if (b.getDiaFeria() != null) dto.setDiaFeria(b.getDiaFeria().name());
@@ -326,6 +333,7 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         if (boleto != null) {
             BoletoServiceImpl.aplicarIdentificacion(boleto, e::setCategoria, s -> { }, e::setNombrePersona);
             if (boleto.getDiaFeria() != null) e.setDiaFeria(boleto.getDiaFeria().name());
+            if (boleto.getTipo() != null) e.setTipoBoleto(boleto.getTipo().name());
         }
         return e;
     }

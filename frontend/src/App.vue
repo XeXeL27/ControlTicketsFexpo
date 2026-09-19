@@ -46,7 +46,7 @@ function alternarSeccion(id: string) {
 function seccionDeRuta(path: string): string {
   if (['/personas', '/usuarios', '/roles', '/'].includes(path)) return 'administracion'
   if (['/estudiantes', '/administrativos', '/docentes', '/impresion', '/entrega', '/huellas'].includes(path)) return 'tickets'
-  if (['/control', '/personas-dentro', '/reportes/personas'].includes(path)) return 'concierto'
+  if (['/control', '/control-talonarios', '/personas-dentro', '/reportes/personas'].includes(path)) return 'concierto'
   if (['/talonarios', '/mis-talonarios'].includes(path)) return 'venta'
   return 'feria'
 }
@@ -199,6 +199,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             </button>
             <div v-show="seccionesAbiertas.concierto" :id="'sec-concierto'" class="menu-enlaces">
             <router-link to="/control">Control de acceso</router-link>
+            <router-link to="/control-talonarios">Control talonarios</router-link>
             <router-link to="/personas-dentro">Personas dentro</router-link>
             <router-link v-if="esAdmin" to="/reportes/personas">Reporte de accesos</router-link>
           </div>

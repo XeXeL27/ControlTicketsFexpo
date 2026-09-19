@@ -40,12 +40,14 @@ public class ControlBoletoController {
 
     @PostMapping("/validar")
     @Operation(summary = "Valida el codigo escaneado/tipeado y registra el movimiento",
-            description = "Busca el boleto por codigo y registra la ENTRADA o SALIDA segun el "
+            description = "Busca el boleto por (tipo, codigo) y registra la ENTRADA o SALIDA segun el "
                     + "escaner dedicado (tipoMovimiento). Intento duplicado (entrar estando dentro / "
-                    + "salir estando fuera): 409 con motivo (YA_DENTRO/YA_FUERA). Codigo inexistente: 404.")
+                    + "salir estando fuera): 409 con motivo (YA_DENTRO/YA_FUERA). Codigo inexistente "
+                    + "en ese tipo: 404.")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<ValidacionBoletoDto> validar(@Valid @RequestBody ValidacionBoletoRequestDto request) {
-        ValidacionBoletoDto dto = controlBoletoService.validar(request.getCodigo(), request.getTipoMovimiento());
+        ValidacionBoletoDto dto = controlBoletoService.validar(
+                request.getCodigo(), request.getTipoMovimiento(), request.getTipoBoleto());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
         return ResponseEntity.status(estado).body(dto);
     }

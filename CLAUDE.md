@@ -503,6 +503,28 @@ npm run build      # vue-tsc -b && vite build · npm run preview sirve ese build
   (`pnpm-lock.yaml`, más viejo que el de npm, y `pnpm-workspace.yaml` con un valor
   sin completar); no mezclar gestores.
 
+### APK Android (Capacitor, puestos en el celular)
+
+El APK lleva **solo el frontend**; el backend + BD quedan en el servidor público
+y el celular les habla por red. En web el front usa `/api` relativo (proxy de
+Vite), pero en el APK no hay proxy: las URLs se hornean al compilar con
+`frontend/.env.apk` (copiar de `.env.apk.example`):
+`VITE_API_URL=https://servidor.com/api` + `VITE_WS_URL=wss://servidor.com`.
+Sin esas variables el APK apunta a sí mismo y nada funciona.
+
+- `npm run build:apk` = `vite build --mode apk` (lee `.env.apk`) + `npx cap sync`.
+- La carpeta `frontend/android/` **sí va a git** (2 MB, guarda el permiso de
+  cámara del `AndroidManifest`). El `.apk` se compila abriendo `android/` en
+  **Android Studio** → Build → Build APK(s) (esta máquina no tiene el SDK).
+- **Checklist del servidor para que el APK ande**: HTTPS (la cámara exige
+  contexto seguro), `app.cors.allowed-origins` con `https://localhost` (origen
+  del APK en Capacitor 8; ya está en el `.example` de produccion) y el WS
+  accesible en `wss://`.
+- El icono sigue siendo el default de Capacitor; para poner el logo UAP usar
+  `capacitor-assets` (pendiente, estético nomás).
+- Ojo: el jar `-Pproduccion` compila el front con `npm run build` (sin `--mode
+  apk`), así que el jar sigue con URLs relativas: el APK y el jar no se pisan.
+
 ### Despliegue en uno (perfil maven `produccion`)
 
 `./mvnw clean package -Pproduccion` compila el frontend (Node propio vía
@@ -799,8 +821,9 @@ un boleto con `diaFeria` solo pasa si hoy es su día:
 > **TODO boleto de la feria vale un día puntual**, incluidos los de venta suelta.
 > Lo que los diferencia de los de administrativo/docente es que **no están asociados
 > a una persona** (eso va a cambiar más adelante), no el día.
-> El CSV de sueltos es **`codigo, dia`** (el día acepta `1`/`2`/`3` o `DIA_1`…), el
+> El CSV de sueltos es **`codigo, dia[, tipo]`** (el día acepta `1`/`2`/`3` o `DIA_1`…), el
 > día es **obligatorio** y reimportar **corrige** el día sin tocar `dentro`.
+> Sin tipo se asume FERIA (ver §8.2.2).
 > Un `diaFeria = null` es una carga vieja o incompleta, **no** "no aplica": la
 > validación lo deja pasar cualquier día, así que hay que completarlo.
 
@@ -909,6 +932,32 @@ solo la ruta relativa del archivo (`archivo_foto`, ej. `2026-09-18/<uuid>.jpg`).
 > Al guardar, el panel se **limpia entero** (no solo cierra el formulario): si solo
 > se cerrara volvería a aparecer la pregunta para alguien ya registrado y el
 > operador no sabría si le quedó guardado.
+
+### 8.2.2 Tipos de boleto: FERIA y PARQUEO (códigos que se repiten)
+
+El `boleto` tiene columna **`tipo`** (`TipoBoleto`: FERIA/PARQUEO) y el UNIQUE es
+**`(tipo, codigo)`**, no el código solo: el 137 de feria y el 137 de parqueo son
+dos boletos distintos (se distinguen a ojo por color/leyenda). Los ya cargados
+quedaron todos en FERIA. El puesto elige tipo + modo (ENTRADA/SALIDA) y valida
+**dentro** de ese tipo (`POST /api/control/boletos/validar` exige `tipoBoleto`;
+sin él responde 400 a propósito, para no validar en la bolsa equivocada en
+silencio). CSV sueltos: `codigo, dia[, tipo]` (sin tipo = FERIA, los archivos
+viejos siguen andando). La asociación a administrativos/docentes es siempre FERIA.
+
+> ⚠️ **Migración manual (ya aplicada en la BD local, FALTA en producción con
+> `ddl-auto=validate`).** `update` no suelta el unique viejo ni crea el compuesto:
+> ```sql
+> ALTER TABLE boleto ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'FERIA';
+> UPDATE boleto SET tipo='FERIA' WHERE tipo IS NULL OR tipo='';
+> ALTER TABLE boleto DROP CONSTRAINT IF EXISTS ukovls0iv6db0nklhueji62ftvu; -- el unique viejo de codigo
+> ALTER TABLE boleto ADD CONSTRAINT boleto_tipo_codigo_unique UNIQUE (tipo, codigo);
+> ALTER TABLE boleto DROP CONSTRAINT IF EXISTS boleto_tipo_check;
+> ALTER TABLE boleto ADD CONSTRAINT boleto_tipo_check CHECK (tipo IN ('FERIA','PARQUEO'));
+> ```
+> (El nombre del unique viejo varía por BD: sale de
+> `SELECT conname FROM pg_constraint WHERE conrelid='boleto'::regclass AND contype='u'`.)
+> Y la trampa de siempre: al sumar un tercer tipo hay que recrear a mano el
+> `boleto_tipo_check` (igual que `ticket_categoria_check`, ver §2).
 
 ## 8.3 Venta de boletos por talonario (feria)
 
@@ -1022,6 +1071,50 @@ talonarios que se ven iguales.
 > Generar boletos NO es un problema de rendimiento: medido, **10.000 filas en 214 ms**.
 > El OOM/timeout que hay documentado en §2 es de armar PDFs con miles de imágenes,
 > no de insertar filas.
+
+### Puerta del concierto por número (particulares de talonario)
+
+El particular del concierto trae un papel numerado **sin QR**, así que `/control`
+(QR) no le sirve. La pantalla **`/control-talonarios`** (roles ADMINISTRADOR +
+CONTROL_CONCIERTO, sección "Control de acceso") valida por **número dentro del
+par (CONCIERTO, evento)**: como los rangos no se solapan en el mismo par, el
+número identifica un solo boleto. El puesto elige evento (EVENTO_1/2/3/COMBO) +
+modo (ENTRADA/SALIDA) y tipea el número; la config queda en `localStorage`.
+
+Reglas (`POST /api/control/talonarios/validar` `{numero, tipoEvento, tipoMovimiento}`):
+- El **ANULADO se rechaza** (409 `ANULADO`); el **DISPONIBLE pasa**: la rendición
+  de la vendedora a veces llega después que la gente a la puerta (decisión de
+  Javier: no frenar la fila por un marcado pendiente).
+- **Día**: EVENTO_1/2/3 solo su día (misma fecha que DIA_1/2/3 de la feria);
+  **COMBO pasa cualquier noche** (vale las tres, decisión de Javier). Fuera del
+  evento → `FUERA_DE_FECHA`, otro día → `DIA_INCORRECTO`.
+- Anti-clones por flag `BoletoTalonario.dentro` (la venta no lo toca) +
+  historial en **`movimiento_talonario`**, con la misma limpieza del "dentro
+  colgado de otro día" que tickets y boletos. El `cierre-jornada` NO los toca;
+  la limpieza al reingresar alcanza.
+
+> ⚠️ **Migración manual (ya aplicada en la BD local, FALTA en producción con
+> `ddl-auto=validate`).** La tabla `movimiento_talonario` hay que crearla a mano:
+> ```sql
+> ALTER TABLE boleto_talonario ADD COLUMN IF NOT EXISTS dentro BOOLEAN NOT NULL DEFAULT FALSE;
+> CREATE TABLE IF NOT EXISTS movimiento_talonario (
+>     id_movimiento_talonario BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+>     _estado VARCHAR(255) NOT NULL,
+>     _fecha_modificacion TIMESTAMPTZ,
+>     _fecha_registro TIMESTAMPTZ NOT NULL,
+>     _modificacion_id_usuario BIGINT,
+>     _registro_id_usuario BIGINT,
+>     fecha_hora TIMESTAMPTZ NOT NULL,
+>     tipo VARCHAR(10) NOT NULL,
+>     id_boleto_talonario BIGINT NOT NULL
+> );
+> ALTER TABLE movimiento_talonario ADD CONSTRAINT movimiento_talonario__estado_check
+>     CHECK (_estado IN ('ACTIVO','ELIMINADO'));
+> ALTER TABLE movimiento_talonario ADD CONSTRAINT movimiento_talonario_tipo_check
+>     CHECK (tipo IN ('ENTRADA','SALIDA'));
+> ALTER TABLE movimiento_talonario ADD CONSTRAINT fk_movtalonario_boleto
+>     FOREIGN KEY (id_boleto_talonario) REFERENCES boleto_talonario(id_boleto_talonario);
+> ```
 
 ### Personas: de dónde viene cada una
 

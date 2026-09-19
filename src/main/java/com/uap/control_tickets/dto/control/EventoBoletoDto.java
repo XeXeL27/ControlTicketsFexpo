@@ -17,6 +17,8 @@ public class EventoBoletoDto {
     /** ENTRADA, SALIDA, BLOQUEADO o NO_VALIDO. */
     private String tipo;
     private String codigo;
+    /** FERIA o PARQUEO: en qué bolsa se validó (null en NO_VALIDO, no se sabe). */
+    private String tipoBoleto;
     /** Motivo cuando tipo=BLOQUEADO o NO_VALIDO (YA_DENTRO, YA_FUERA, NO_VALIDO). */
     private String motivo;
     private Instant fechaHora;

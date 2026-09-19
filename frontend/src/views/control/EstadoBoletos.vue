@@ -18,7 +18,7 @@ import { listarBoletos } from '@/api/boleto.service'
 import { resumenBoletos } from '@/api/control-boleto.service'
 import { conectarBoletosWs } from '@/api/ws-boletos'
 import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
-import type { BoletoDetalleDto, DiaFeria, EventoBoletoDto, ResumenBoletosDto } from '@/types/boleto.type'
+import type { BoletoDetalleDto, DiaFeria, EventoBoletoDto, ResumenBoletosDto, TipoBoleto } from '@/types/boleto.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
 const alertas = useAlertas()
@@ -31,6 +31,7 @@ const detalleAbierto = ref<FilaBoletoAgrupada | null>(null)
 
 const filtroEstado = ref<'' | 'dentro' | 'fuera'>('')
 const filtroCategoria = ref<'' | 'PARTICULAR' | 'ADMINISTRATIVO' | 'DOCENTE'>('')
+const filtroTipo = ref<'' | TipoBoleto>('')
 
 // Agrupa: administrativos/docentes en UNA fila por persona (sus 3 boletos
 // adentro), particulares una fila por boleto (como antes).
@@ -45,6 +46,7 @@ const filas = computed(() => {
   if (filtroEstado.value === 'dentro') f = f.filter((x) => (x.esPersona ? x.algunoDentro : x.dentro))
   else if (filtroEstado.value === 'fuera') f = f.filter((x) => (x.esPersona ? !x.algunoDentro : !x.dentro))
   if (filtroCategoria.value) f = f.filter((x) => x.categoria === filtroCategoria.value)
+  if (filtroTipo.value) f = f.filter((x) => x.tipo === filtroTipo.value)
   return f
 })
 
@@ -58,6 +60,7 @@ function verDetalle(fila: FilaBoletoAgrupada) {
 
 const columnas: ColumnaTabla[] = [
   { clave: 'identificador', titulo: 'Código / Persona' },
+  { clave: 'tipo', titulo: 'Tipo', ancho: '110px' },
   { clave: 'categoria', titulo: 'Categoría', ancho: '130px' },
   { clave: 'estadoDias', titulo: 'Estado / Días', ancho: '190px', buscable: false, ordenable: false },
   { clave: 'ultimoTipo', titulo: 'Último movimiento', buscable: false },
@@ -78,7 +81,10 @@ async function cargarTodo(): Promise<void> {
 
 function aplicarEvento(evento: EventoBoletoDto): void {
   if (evento.tipo !== 'ENTRADA' && evento.tipo !== 'SALIDA') return
-  const b = boletos.value.find((x) => x.codigo === evento.codigo)
+  // El código se repite entre tipos: se actualiza solo la fila de la bolsa
+  // donde se validó (si el evento no trae tipo, se usa el código como antes).
+  const b = boletos.value.find((x) => x.codigo === evento.codigo
+    && (!evento.tipoBoleto || x.tipo === evento.tipoBoleto))
   if (b) {
     b.dentro = evento.tipo === 'ENTRADA'
     b.ultimoTipo = evento.tipo
@@ -176,6 +182,11 @@ onUnmounted(() => cerrarWs?.())
             <option value="ADMINISTRATIVO">Administrativos ({{ administrativosCount }})</option>
             <option value="DOCENTE">Docentes ({{ docentesCount }})</option>
           </select>
+          <select v-model="filtroTipo" style="max-width:160px" aria-label="Filtrar por tipo">
+            <option value="">Feria + parqueo</option>
+            <option value="FERIA">Feria</option>
+            <option value="PARQUEO">Parqueo</option>
+          </select>
         </template>
 
         <template #col-identificador="{ fila }">
@@ -187,6 +198,11 @@ onUnmounted(() => cerrarWs?.())
           <span v-if="valor === 'PARTICULAR'" class="chip">Particular</span>
           <span v-else-if="valor === 'ADMINISTRATIVO'" class="chip" style="background:#ede9fe;color:#5b21b6">Administrativo</span>
           <span v-else class="chip" style="background:#fef3c7;color:#92400e">Docente</span>
+        </template>
+
+        <template #col-tipo="{ valor }">
+          <span v-if="valor === 'PARQUEO'" class="chip" style="background:#ffedd5;color:#9a3412">Parqueo</span>
+          <span v-else class="chip">Feria</span>
         </template>
 
         <!-- Particular: chip Dentro/Fuera. Persona: 3 badges de día. -->

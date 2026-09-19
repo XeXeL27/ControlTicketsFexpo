@@ -7,6 +7,7 @@ import com.uap.control_tickets.dto.boleto.PrevisualizacionBoletoCsvDto;
 import com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto;
 import com.uap.control_tickets.enums.DiaFeria;
 import com.uap.control_tickets.enums.EstadoRegistro;
+import com.uap.control_tickets.enums.TipoBoleto;
 import com.uap.control_tickets.exception.NegocioException;
 import com.uap.control_tickets.exception.RecursoNoEncontradoException;
 import com.uap.control_tickets.models.entity.Administrativo;
@@ -116,7 +117,8 @@ public class BoletoServiceImpl implements BoletoService {
                 resultado.setTotalFilas(resultado.getTotalFilas() + 1);
                 try {
                     BoletoDto dto = filaADto(linea, sep);
-                    boolean yaExistia = boletoDao.findByCodigo(
+                    TipoBoleto tipo = tipoDe(dto);
+                    boolean yaExistia = boletoDao.findByTipoAndCodigo(tipo,
                             dto.getCodigo() == null ? "" : dto.getCodigo().trim()).isPresent();
                     crearBoleto(dto, true);
                     if (yaExistia) {
@@ -178,6 +180,7 @@ public class BoletoServiceImpl implements BoletoService {
                 fp.setFila(fila);
                 fp.setCodigo(dto.getCodigo());
                 if (dto.getDiaFeria() != null) fp.setDiaFeria(dto.getDiaFeria().name());
+                fp.setTipo(tipoDe(dto).name());
 
                 if (dto.getCodigo() == null) {
                     fp.setEstado("Falta el código");
@@ -187,7 +190,7 @@ public class BoletoServiceImpl implements BoletoService {
                     // ANTES de importar, no después.
                     fp.setEstado("Falta el día (1, 2 o 3)");
                     p.setConProblemas(p.getConProblemas() + 1);
-                } else if (boletoDao.findByCodigo(dto.getCodigo()).isPresent()) {
+                } else if (boletoDao.findByTipoAndCodigo(tipoDe(dto), dto.getCodigo()).isPresent()) {
                     fp.setEstado("YA_EXISTE");
                     p.setExistentes(p.getExistentes() + 1);
                 } else {
@@ -304,7 +307,9 @@ public class BoletoServiceImpl implements BoletoService {
                     codBoleto = codBoleto.trim();
 
                     try {
-                        Boleto previo = boletoDao.findByCodigo(codBoleto).orElse(null);
+                        // La asociación a personas es solo de FERIA (los 3 boletos
+                        // que se entregan con el ticket QR son de la feria).
+                        Boleto previo = boletoDao.findByTipoAndCodigo(TipoBoleto.FERIA, codBoleto).orElse(null);
                         boolean existiaActivo = previo != null && previo.getEstado() == EstadoRegistro.ACTIVO;
 
                         if (existiaActivo && yaAsociado.test(previo)) {
@@ -325,6 +330,7 @@ public class BoletoServiceImpl implements BoletoService {
                         boolean esNuevo = previo == null;
                         b.setEstado(EstadoRegistro.ACTIVO);
                         b.setCodigo(codBoleto);
+                        b.setTipo(TipoBoleto.FERIA);
                         if (esNuevo) b.setDentro(false);
                         asociar.accept(b, persona);
                         b.setDiaFeria(dias[i]);
@@ -369,11 +375,13 @@ public class BoletoServiceImpl implements BoletoService {
      */
     private Boleto crearBoleto(BoletoDto dto, boolean actualizar) {
         String codigo = req(dto.getCodigo(), "código");
+        TipoBoleto tipo = tipoDe(dto);
 
-        Boleto previo = boletoDao.findByCodigo(codigo).orElse(null);
+        Boleto previo = boletoDao.findByTipoAndCodigo(tipo, codigo).orElse(null);
         if (previo != null && previo.getEstado() == EstadoRegistro.ACTIVO) {
             if (!actualizar) {
-                throw new NegocioException("Ya existe un boleto con el código '" + codigo + "'");
+                throw new NegocioException("Ya existe un boleto de " + tipo.etiqueta()
+                        + " con el código '" + codigo + "'");
             }
             // Reimportar CORRIGE el día (así se arregla un archivo mal cargado),
             // pero NO toca 'dentro': si la persona está adentro, sigue adentro.
@@ -387,6 +395,7 @@ public class BoletoServiceImpl implements BoletoService {
         Boleto b = previo != null ? previo : new Boleto();
         b.setEstado(EstadoRegistro.ACTIVO);
         b.setCodigo(codigo);
+        b.setTipo(tipo);
         // El día es obligatorio para los sueltos: un boleto sin día no se puede
         // validar en la puerta y entraría cualquier día del evento.
         if (dto.getDiaFeria() == null) {
@@ -408,13 +417,32 @@ public class BoletoServiceImpl implements BoletoService {
     }
 
     /** Posicional: [0]=codigo (única columna esperada). */
-    /** CSV de boletos sueltos: `codigo, dia`. El día acepta 1/2/3 o DIA_1/DIA_2/DIA_3. */
+    /** CSV de boletos sueltos: `codigo, dia[, tipo]`. El día acepta 1/2/3 o DIA_1/DIA_2/DIA_3. */
     private BoletoDto filaADto(String linea, char sep) {
         String[] c = CsvUtils.separar(linea, sep);
         BoletoDto dto = new BoletoDto();
         dto.setCodigo(CsvUtils.get(c, 0));
         dto.setDiaFeria(parsearDia(CsvUtils.get(c, 1)));
+        dto.setTipoBoleto(parsearTipo(CsvUtils.get(c, 2)));
         return dto;
+    }
+
+    /**
+     * El tipo es opcional en el archivo (columna 3): si no viene se asume FERIA,
+     * así los CSV viejos de `codigo, dia` siguen funcionando. Acepta
+     * FERIA/FERIA… y PARQUEO (o "parqueo"/"parq").
+     */
+    private TipoBoleto parsearTipo(String valor) {
+        if (valor == null || valor.isBlank()) return TipoBoleto.FERIA;
+        String n = CsvUtils.normalizar(valor);
+        if (n.contains("parq")) return TipoBoleto.PARQUEO;
+        if (n.contains("feria")) return TipoBoleto.FERIA;
+        throw new NegocioException("Tipo no reconocido: '" + valor + "'. Use FERIA o PARQUEO.");
+    }
+
+    /** El tipo del DTO, con FERIA por defecto si el cliente no lo mandó. */
+    private TipoBoleto tipoDe(BoletoDto dto) {
+        return dto.getTipoBoleto() != null ? dto.getTipoBoleto() : TipoBoleto.FERIA;
     }
 
     /**
@@ -449,6 +477,7 @@ public class BoletoServiceImpl implements BoletoService {
         BoletoDetalleDto dto = new BoletoDetalleDto();
         dto.setIdBoleto(b.getIdBoleto());
         dto.setCodigo(b.getCodigo());
+        dto.setTipo(b.getTipo() == null ? null : b.getTipo().name());
         dto.setEstado(b.getEstado().name());
         dto.setDentro(b.isDentro());
         movimientoBoletoDao.findAllByBoletoIdBoletoOrderByFechaHoraDesc(b.getIdBoleto())

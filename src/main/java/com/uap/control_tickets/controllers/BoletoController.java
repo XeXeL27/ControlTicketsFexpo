@@ -53,8 +53,10 @@ public class BoletoController {
 
     @PostMapping(value = "/importar", consumes = "multipart/form-data")
     @Operation(summary = "Importar boletos desde un CSV",
-            description = "Dos columnas: código del boleto y el día en que vale (1, 2 o 3). Reimportar el mismo listado no falla y corrige el día si cambió."
-                    + "(los códigos repetidos se saltean sin tocar su estado dentro/fuera).")
+            description = "Tres columnas: código del boleto, el día en que vale (1, 2 o 3) y el tipo "
+                    + "(FERIA o PARQUEO, opcional: si no viene se asume FERIA). Reimportar el mismo listado "
+                    + "no falla y corrige el día si cambió (los códigos repetidos DENTRO del mismo tipo se "
+                    + "saltean sin tocar su estado dentro/fuera).")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ImportacionResultadoDto> importar(@RequestParam("archivo") MultipartFile archivo) {
         return ResponseEntity.ok(boletoService.importarCsv(archivo));

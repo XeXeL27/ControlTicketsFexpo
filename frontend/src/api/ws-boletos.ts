@@ -10,8 +10,11 @@ import { Client, type IMessage } from '@stomp/stompjs'
 import { auth } from '@/store/auth'
 import type { EventoBoletoDto } from '@/types/boleto.type'
 
-/** URL del endpoint STOMP. Mismo host/puerto que la app (Vite lo proxea con ws:true). */
+/** URL del endpoint STOMP. En web: mismo host/puerto que la app (Vite lo proxea
+ *  con ws:true). En el APK: se hornea con VITE_WS_URL=wss://servidor.com */
 function urlWs(): string {
+  const base = import.meta.env.VITE_WS_URL
+  if (base) return `${base}/ws`
   const protocolo = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocolo}//${location.host}/ws`
 }

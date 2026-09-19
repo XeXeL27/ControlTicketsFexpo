@@ -8,9 +8,13 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:apk": "vue-tsc -b && vite build --mode apk && npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@stomp/stompjs": "^7.3.0",
     "@zxing/browser": "^0.2.1",
     "axios": "^1.7.9",

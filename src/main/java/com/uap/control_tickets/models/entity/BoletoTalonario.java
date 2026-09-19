@@ -57,4 +57,13 @@ public class BoletoTalonario extends AuditoriaConfig {
 
     @Column(name = "fecha_venta")
     private Instant fechaVenta;
+
+    /**
+     * Estado actual en la puerta: true = el portador está dentro del recinto.
+     * Solo lo usa la validación de ingreso al concierto (puesto por número);
+     * la venta no lo toca. El historial queda en {@link MovimientoTalonario}.
+     */
+    @Column(name = "dentro", nullable = false,
+            columnDefinition = "boolean not null default false")
+    private boolean dentro = false;
 }

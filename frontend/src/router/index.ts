@@ -28,6 +28,8 @@ import Huellas from '@/views/Huellas.vue'
 import ControlValidador from '@/views/control/ControlValidador.vue'
 import PersonasDentro from '@/views/control/PersonasDentro.vue'
 import ReportePersonas from '@/views/control/ReportePersonas.vue'
+// Puesto del concierto por número (particulares con papel de talonario, sin QR)
+import ControlTalonarios from '@/views/control/ControlTalonarios.vue'
 
 // --- Venta de boletos por talonario (feria) ---
 import Talonarios from '@/views/Talonarios.vue'
@@ -74,6 +76,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/control', component: ControlValidador, meta: { roles: CONCIERTO } },
   { path: '/personas-dentro', component: PersonasDentro, meta: { roles: CONCIERTO } },
   { path: '/reportes/personas', component: ReportePersonas, meta: { roles: ADMIN } },
+  // Puesto del concierto por número (particulares de talonario, sin QR).
+  { path: '/control-talonarios', component: ControlTalonarios, meta: { roles: CONCIERTO } },
 
   // Venta de boletos por talonario. La administración es del ADMINISTRADOR;
   // cada vendedora marca los suyos en /mis-talonarios.

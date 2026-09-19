@@ -12,6 +12,13 @@ export type DestinoTalonario = 'CONCIERTO' | 'FERIA' | 'PARQUEO'
 /** Para qué evento sirve el talonario. El combo es UN boleto que vale los 3 días. */
 export type TipoTalonario = 'EVENTO_1' | 'EVENTO_2' | 'EVENTO_3' | 'COMBO'
 
+export const ETIQUETA_TIPO_TALONARIO: Record<TipoTalonario, string> = {
+  EVENTO_1: 'Evento 1',
+  EVENTO_2: 'Evento 2',
+  EVENTO_3: 'Evento 3',
+  COMBO: 'Combo (3 días)',
+}
+
 /** Opciones para los selectores, en el orden en que se muestran. */
 export const DESTINOS: { valor: DestinoTalonario; etiqueta: string }[] = [
   { valor: 'CONCIERTO', etiqueta: 'Concierto' },
@@ -118,4 +125,28 @@ export interface ResultadoAsignacionDto {
   asignados: number
   quitados: number
   total: number
+}
+
+// --- Puesto del concierto (validación por número, sin QR) ---
+
+import type { TipoMovimiento } from '@/types/control.type'
+
+/** Respuesta del puesto del concierto (ValidacionTalonarioDto). */
+export interface ValidacionTalonarioDto {
+  idBoletoTalonario: number
+  numero: number
+  /** Nombre del talonario ("Talonario A"). */
+  nombreTalonario: string
+  tipoEvento: TipoTalonario
+  /** true = el portador quedó dentro tras esta validación. */
+  dentro: boolean
+  /** true = el movimiento fue denegado (no se registró nada). */
+  bloqueado: boolean
+  /** ANULADO, DIA_INCORRECTO, FUERA_DE_FECHA, YA_DENTRO o YA_FUERA. */
+  motivo?: string
+  mensaje?: string
+  ultimoTipo?: TipoMovimiento
+  ultimaFecha?: string
+  /** Hora de la ENTRADA vigente (cuando dentro=true). */
+  entrada?: string
 }

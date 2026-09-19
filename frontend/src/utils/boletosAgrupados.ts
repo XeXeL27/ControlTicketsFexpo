@@ -4,7 +4,7 @@
 //   veces), con sus hasta-3 boletos (uno por día) adentro. La tabla los pinta
 //   como 3 "badges" de día en vez de 3 filas idénticas.
 // Lo comparten Boletos.vue y EstadoBoletos.vue.
-import type { BoletoDetalleDto, CategoriaBoleto, DiaFeria } from '@/types/boleto.type'
+import type { BoletoDetalleDto, CategoriaBoleto, DiaFeria, TipoBoleto } from '@/types/boleto.type'
 
 const ORDEN_DIAS: DiaFeria[] = ['DIA_1', 'DIA_2', 'DIA_3']
 
@@ -17,6 +17,8 @@ export interface FilaBoletoAgrupada {
   idFila: string
   esPersona: boolean
   categoria: CategoriaBoleto
+  /** FERIA o PARQUEO (las filas de persona siempre son FERIA). */
+  tipo: TipoBoleto
   /** Texto de la columna principal: código (particular) o "Nombre (código)" (persona). */
   identificador: string
 
@@ -46,6 +48,7 @@ export function agruparBoletos(boletos: BoletoDetalleDto[]): FilaBoletoAgrupada[
         idFila: 'b-' + b.idBoleto,
         esPersona: false,
         categoria: b.categoria,
+        tipo: b.tipo,
         identificador: b.codigo,
         idBoleto: b.idBoleto,
         codigo: b.codigo,
@@ -72,6 +75,7 @@ export function agruparBoletos(boletos: BoletoDetalleDto[]): FilaBoletoAgrupada[
       idFila: 'p-' + clave,
       esPersona: true,
       categoria: primero.categoria,
+      tipo: primero.tipo,
       identificador: `${primero.nombrePersona} (${primero.codigoPersona}) ${codigosDias}`.trim(),
       nombrePersona: primero.nombrePersona,
       codigoPersona: primero.codigoPersona,

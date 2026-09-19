@@ -6,22 +6,25 @@ import type {
   RegistroSalidaDetalleDto,
   RegistroSalidaDto,
   ResumenBoletosDto,
+  TipoBoleto,
   ValidacionBoletoDto,
 } from '@/types/boleto.type'
 import type { TipoMovimiento } from '@/types/control.type'
 
 /**
- * Valida el codigo del boleto con el escaner dedicado (tipoMovimiento).
- * Lanza una excepcion axios si el boleto no existe (404) o el movimiento no
- * coincide con el estado (409, cuerpo = ValidacionBoletoDto).
+ * Valida el codigo del boleto con el escaner dedicado (tipoMovimiento),
+ * DENTRO del tipo de boleto del puesto (tipoBoleto).
+ * Lanza una excepcion axios si el boleto no existe en ese tipo (404) o el
+ * movimiento no coincide con el estado (409, cuerpo = ValidacionBoletoDto).
  */
 export async function validarBoleto(
   codigo: string,
   tipoMovimiento: TipoMovimiento,
+  tipoBoleto: TipoBoleto,
 ): Promise<ValidacionBoletoDto> {
   const res = await http.post<ValidacionBoletoDto>(
     '/control/boletos/validar',
-    { codigo, tipoMovimiento },
+    { codigo, tipoMovimiento, tipoBoleto },
     { timeout: 15000 },
   )
   return res.data

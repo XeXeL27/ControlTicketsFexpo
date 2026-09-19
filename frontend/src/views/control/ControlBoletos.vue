@@ -1,51 +1,66 @@
 <script setup lang="ts">
-// Módulo CONTROL: pantalla EXCLUSIVA para validar códigos de boleto de la feria.
-// Los boletos NO tienen QR ni foto: solo un código impreso, así que ambos
-// paneles (ENTRADA / SALIDA) muestran siempre su input, sin cámara. El backend
-// rechaza los duplicados (entrar estando dentro / salir estando fuera).
+// Módulo CONTROL: pantalla EXCLUSIVA para validar códigos de boleto.
+// Los boletos NO tienen QR ni foto: solo un código impreso, así que el panel
+// muestra siempre su input, sin cámara. El puesto es DEDICADO dos veces: modo
+// (ENTRADA o SALIDA) y tipo de boleto (FERIA o PARQUEO), a elegir arriba. Solo
+// se monta el panel de esa combinación; el resto no ocupa espacio. El backend
+// rechaza los duplicados (entrar estando dentro / salir estando fuera) y busca
+// el código SOLO dentro del tipo elegido (el 137 de feria y el de parqueo son
+// dos boletos distintos).
 // La lista completa de boletos vive ahora en "Estado de boletos" (EstadoBoletos.vue).
 //
-// Se mantiene un resumen rápido en vivo (dentro/ingresos/salidas) por WebSocket
-// (STOMP, /topic/boletos) para que el portero tenga contexto sin salir de acá.
+// Sin resumen de contadores: el portero solo registra, no necesita esos datos.
+// Solo queda el indicador "En vivo" (punto verde) que avisa si hay conexión
+// con el servidor.
 // Pensada para usarse desde el celular en la puerta (estilos responsive).
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import PanelEscaneoBoleto from '@/components/PanelEscaneoBoleto.vue'
-import { useAlertas } from '@/composables/useAlertas'
-import { mensajeError } from '@/utils/errores'
-import { resumenBoletos } from '@/api/control-boleto.service'
+import SelectBase from '@/components/SelectBase.vue'
+import type { OpcionSelect } from '@/components/SelectBase.vue'
 import { conectarBoletosWs } from '@/api/ws-boletos'
-import type { EventoBoletoDto, ResumenBoletosDto } from '@/types/boleto.type'
+import { ETIQUETA_TIPO_BOLETO } from '@/types/boleto.type'
+import type { TipoBoleto } from '@/types/boleto.type'
+import type { TipoMovimiento } from '@/types/control.type'
 
-const alertas = useAlertas()
-const resumen = ref<ResumenBoletosDto | null>(null)
 const enVivo = ref(false)
 
-async function cargarResumen(): Promise<void> {
-  try {
-    resumen.value = await resumenBoletos()
-  } catch (e) {
-    alertas.error(mensajeError(e, 'No se pudo cargar el resumen de boletos'))
-  }
+/** El puesto recuerda su configuración (modo + tipo) entre recargas: en la
+ *  puerta no hay tiempo para reconfigurar cada vez que se abre el navegador. */
+const CLAVE_MODO = 'control-boletos-modo'
+const CLAVE_TIPO = 'control-boletos-tipo'
+
+function leerModo(): TipoMovimiento {
+  return localStorage.getItem(CLAVE_MODO) === 'SALIDA' ? 'SALIDA' : 'ENTRADA'
+}
+function leerTipo(): TipoBoleto {
+  return localStorage.getItem(CLAVE_TIPO) === 'PARQUEO' ? 'PARQUEO' : 'FERIA'
 }
 
-// Actualiza los contadores del resumen en vivo con cada validación (de cualquier
-// puesto), sin volver a pedir nada al servidor.
-function aplicarEvento(evento: EventoBoletoDto): void {
-  if (evento.tipo !== 'ENTRADA' && evento.tipo !== 'SALIDA') return
-  if (!resumen.value) return
-  resumen.value.dentro = evento.dentroAhora
-  if (evento.tipo === 'ENTRADA') resumen.value.ingresosTotal++
-  else resumen.value.salidasTotal++
-}
+/** Modo del puesto: cada escaner es DEDICADO (entrada o salida). Solo se
+ *  muestra el panel elegido, para que el otro no ocupe espacio. */
+const modo = ref<TipoMovimiento>(leerModo())
+const modos: OpcionSelect<TipoMovimiento>[] = [
+  { valor: 'ENTRADA', etiqueta: 'Controlar ingreso', detalle: 'Solo valida entradas' },
+  { valor: 'SALIDA', etiqueta: 'Controlar salida', detalle: 'Solo valida salidas' },
+]
+
+/** Tipo de boleto del puesto (FERIA o PARQUEO). El código solo se busca dentro
+ *  de este tipo: así dos boletos con el mismo código no se confunden. */
+const tipoBoleto = ref<TipoBoleto>(leerTipo())
+const tipos: OpcionSelect<TipoBoleto>[] = (['FERIA', 'PARQUEO'] as const).map((t) => ({
+  valor: t,
+  etiqueta: ETIQUETA_TIPO_BOLETO[t],
+  detalle: t === 'FERIA' ? 'Boletos de la feria' : 'Boletos de parqueo',
+}))
+
+watch(modo, (v) => localStorage.setItem(CLAVE_MODO, v))
+watch(tipoBoleto, (v) => localStorage.setItem(CLAVE_TIPO, v))
 
 let cerrarWs: (() => void) | undefined
-let yaConectoUnaVez = false
 onMounted(() => {
-  void cargarResumen()
-  cerrarWs = conectarBoletosWs(aplicarEvento, (conectado) => {
+  // Sin manejador de eventos: solo interesa el estado de conexión (enVivo).
+  cerrarWs = conectarBoletosWs(() => {}, (conectado) => {
     enVivo.value = conectado
-    if (conectado && yaConectoUnaVez) void cargarResumen()
-    if (conectado) yaConectoUnaVez = true
   })
 })
 onUnmounted(() => cerrarWs?.())
@@ -53,87 +68,59 @@ onUnmounted(() => cerrarWs?.())
 
 <template>
   <div class="control">
-    <div class="cabecera">
-      <div>
-        <h2>Control de boletos — Feria</h2>
-        <p class="subtitulo">
-          Escriba el código del boleto en el panel de ENTRADA o de SALIDA y presione Enter para validarlo.
-        </p>
-      </div>
-      <span class="estado-vivo" :class="{ activo: enVivo }">
-        <span class="punto"></span>{{ enVivo ? 'En vivo' : 'Conectando…' }}
-      </span>
+    <!-- Barra minima: modo + tipo del puesto + estado de conexion. Sin titulo
+      ni textos: en el celular cada pixel es para el panel de registro. -->
+    <div class="barra">
+      <label class="modo">
+        <SelectBase v-model="modo" :opciones="modos" ariaLabel="Modo del puesto" />
+      </label>
+      <label class="modo">
+        <SelectBase v-model="tipoBoleto" :opciones="tipos" ariaLabel="Tipo de boleto del puesto" />
+      </label>
+      <span
+        class="punto-vivo"
+        :class="{ activo: enVivo }"
+        :title="enVivo ? 'Conectado al servidor' : 'Sin conexión'"
+      ></span>
     </div>
 
-    <!-- Resumen rapido en vivo -->
-    <div class="resumen" v-if="resumen">
-      <div class="dato">
-        <span class="numero" style="color:var(--verde)">{{ resumen.dentro }}</span>
-        <span class="etiqueta">dentro ahora</span>
-      </div>
-      <div class="dato">
-        <span class="numero">{{ resumen.totalBoletos }}</span>
-        <span class="etiqueta">boletos cargados</span>
-      </div>
-      <div class="dato">
-        <span class="numero" style="color:var(--azul)">{{ resumen.ingresosTotal }}</span>
-        <span class="etiqueta">ingresos totales</span>
-      </div>
-      <div class="dato">
-        <span class="numero">{{ resumen.salidasTotal }}</span>
-        <span class="etiqueta">salidas totales</span>
-      </div>
-    </div>
-
+    <!-- Solo el panel de la combinación elegida (lo demás no se monta: no ocupa
+      espacio). El :key reinicia el panel al cambiar modo o tipo. -->
     <div class="columnas">
-      <PanelEscaneoBoleto tipo="ENTRADA" titulo="Entrada" />
-      <PanelEscaneoBoleto tipo="SALIDA" titulo="Salida" />
+      <PanelEscaneoBoleto
+        :key="modo + '-' + tipoBoleto"
+        :tipo="modo"
+        :tipo-boleto="tipoBoleto"
+        :titulo="modo === 'ENTRADA' ? 'Entrada' : 'Salida'"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
-.control { display: flex; flex-direction: column; gap: 16px; }
+.control { display: flex; flex-direction: column; gap: 12px; }
 
-.cabecera {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+/* Barra minima: selector de modo + punto de conexion, en una sola fila. */
+.barra { display: flex; align-items: center; gap: 8px; }
+.modo { flex: 1 1 auto; min-width: 0; }
+
+/* Punto de conexión: verde en vivo, rojo sin conexión. Sin texto, para no
+   robarle espacio al panel de registro. */
+.punto-vivo {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+  background: var(--rojo, #dc2626);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .15);
+}
+.punto-vivo.activo {
+  background: var(--verde);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, .2);
 }
 
-.subtitulo { color: var(--texto-suave); margin-top: -10px; font-size: 14px; }
-
-/* Indicador de conexion en vivo: gris "conectando" hasta el primer CONNECT. */
-.estado-vivo {
-  display: inline-flex; align-items: center; gap: 7px;
-  font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--texto-suave); background: #f1f5f9; border: 1px solid var(--borde);
-  padding: 6px 12px; border-radius: 999px; flex-shrink: 0;
-}
-.estado-vivo .punto { width: 8px; height: 8px; border-radius: 50%; background: var(--texto-suave); }
-.estado-vivo.activo { color: #166534; background: #ecfdf5; border-color: #a7f3d0; }
-.estado-vivo.activo .punto { background: var(--verde); box-shadow: 0 0 0 3px rgba(22,163,74,.2); }
-
-.resumen { display: flex; gap: 12px; flex-wrap: wrap; }
-.dato {
-  display: flex; flex-direction: column; align-items: center; text-align: center;
-  background: #f8fafc; border: 1px solid var(--borde);
-  border-radius: 10px; padding: 14px 18px;
-  flex: 1 1 130px;
-}
-.numero { font-size: 26px; font-weight: 800; line-height: 1.1; }
-.etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 4px; }
-
+/* Un solo panel visible (segun el modo): ocupa todo el ancho. */
 .columnas {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
-}
-
-@media (max-width: 1000px) {
-  .columnas { grid-template-columns: 1fr; }
 }
 </style>

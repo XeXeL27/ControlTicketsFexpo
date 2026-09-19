@@ -12,6 +12,9 @@ public class BoletoDetalleDto {
     private String codigo;
     private String estado;
 
+    /** FERIA o PARQUEO: a qué da ingreso este boleto. */
+    private String tipo;
+
     /** true = el portador esta actualmente dentro del recinto. */
     private boolean dentro;
 

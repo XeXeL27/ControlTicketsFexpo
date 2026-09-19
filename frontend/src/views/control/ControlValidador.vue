@@ -1,121 +1,63 @@
 <script setup lang="ts">
-// Modulo CONTROL: control de acceso con escaneres DEDICADOS.
-//
-// Cada panel (ENTRADA verde / SALIDA azul) arranca con su boton: solo al
-// pulsarlo se abre la camara (un solo escaner activo a la vez, para no pedir
-// las dos camaras). El backend rechaza los duplicados (entrar estando dentro /
-// salir estando fuera) y valida la matricula solo al entrar un estudiante.
-// Debajo, la lista de quienes estan actualmente dentro del recinto.
-import { onMounted, ref } from 'vue'
+// Módulo CONTROL: control de acceso con escáner DEDICADO (ENTRADA o SALIDA,
+// a elegir arriba). Solo se monta ese panel; al pulsar su botón se abre la
+// cámara. El backend rechaza los duplicados (entrar estando dentro / salir
+// estando fuera) y valida la matrícula solo al entrar un estudiante.
+// (La lista de quienes están dentro vive en "Personas dentro", no acá.)
+// Compacta para el celular: sin título ni textos, solo selectores y panel.
+import { ref, watch } from 'vue'
 import PanelEscaneo from '@/components/PanelEscaneo.vue'
-import TablaDatos from '@/components/TablaDatos.vue'
+import SelectBase from '@/components/SelectBase.vue'
+import type { OpcionSelect } from '@/components/SelectBase.vue'
 import ConsultaRu from '@/components/ConsultaRu.vue'
-import { useAlertas } from '@/composables/useAlertas'
-import { mensajeError } from '@/utils/errores'
-import { personasDentro } from '@/api/control.service'
-import type { PersonaDentroDto, TipoMovimiento } from '@/types/control.type'
+import type { TipoMovimiento } from '@/types/control.type'
 
-const alertas = useAlertas()
+/** El puesto recuerda su modo entre recargas. */
+const CLAVE_MODO = 'control-modo'
 
-/** Cual panel tiene la camara abierta (solo uno a la vez). */
-const activo = ref<TipoMovimiento | null>(null)
+/** Modo del puesto: escáner DEDICADO (entrada o salida). */
+const modo = ref<TipoMovimiento>(
+  localStorage.getItem(CLAVE_MODO) === 'SALIDA' ? 'SALIDA' : 'ENTRADA',
+)
+const modos: OpcionSelect<TipoMovimiento>[] = [
+  { valor: 'ENTRADA', etiqueta: 'Controlar ingreso', detalle: 'Solo valida entradas' },
+  { valor: 'SALIDA', etiqueta: 'Controlar salida', detalle: 'Solo valida salidas' },
+]
 
-/** Referencias a los paneles para poder limpiar el resultado del otro. */
-const refEntrada = ref<InstanceType<typeof PanelEscaneo> | null>(null)
-const refSalida = ref<InstanceType<typeof PanelEscaneo> | null>(null)
+/** Si la cámara del panel único está abierta. */
+const activo = ref(false)
+
+watch(modo, (v) => {
+  localStorage.setItem(CLAVE_MODO, v)
+  // Al cambiar de modo se cierra la cámara (el :key ya reinicia el panel).
+  activo.value = false
+})
 
 /** Modal de consulta puntual de matricula por RU. */
 const mostrarConsultaRu = ref(false)
-
-const dentro = ref<PersonaDentroDto[]>([])
-const cargandoDentro = ref(false)
-
-function abrir(tipo: TipoMovimiento): void {
-  // Al abrir un escaner se limpia el resultado del otro, para que cada
-  // escaneo arranque limpio y no queden datos de la operacion anterior.
-  if (tipo === 'ENTRADA') refSalida.value?.limpiar()
-  else refEntrada.value?.limpiar()
-  activo.value = tipo
-}
-
-async function cargarDentro(): Promise<void> {
-  cargandoDentro.value = true
-  try {
-    dentro.value = await personasDentro()
-  } catch (e) {
-    alertas.error(mensajeError(e, 'No se pudo cargar la lista de personas dentro'))
-  } finally {
-    cargandoDentro.value = false
-  }
-}
-
-function nombreCategoria(categoria: string): string {
-  return { ESTUDIANTE: 'Estudiante', ADMINISTRATIVO: 'Administrativo', DOCENTE: 'Docente', EXTERNO: 'Particular' }[categoria] ?? categoria
-}
-function hora(valor?: string) {
-  return valor ? new Date(valor).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'
-}
-
-onMounted(() => {
-  void cargarDentro()
-})
-
-const columnas = [
-  { clave: 'nombreCompleto', titulo: 'Nombre' },
-  { clave: 'ci', titulo: 'CI' },
-  { clave: 'categoria', titulo: 'Categoria' },
-  { clave: 'codigoIdentificacion', titulo: 'Codigo' },
-  { clave: 'entrada', titulo: 'Entrada' },
-]
 </script>
 
 <template>
   <div class="control">
-    <div class="cabecera">
-      <div>
-        <h2>Control de acceso</h2>
-        <p class="subtitulo">
-          Pulse el boton de ENTRADA o de SALIDA para abrir ese escaner. Un estudiante se valida al entrar.
-        </p>
-      </div>
-      <button class="consultar-ru" @click="mostrarConsultaRu = true">Consultar RU</button>
+    <!-- Barra mínima: modo del puesto + consulta de RU. Sin título ni textos:
+      en el celular cada píxel es para el escáner. -->
+    <div class="barra">
+      <label class="modo">
+        <SelectBase v-model="modo" :opciones="modos" ariaLabel="Modo del puesto" />
+      </label>
+      <button class="consultar-ru secundario" @click="mostrarConsultaRu = true">RU</button>
     </div>
 
+    <!-- Solo el panel del modo elegido (el :key lo reinicia al cambiar). -->
     <div class="columnas">
       <PanelEscaneo
-        ref="refEntrada"
-        tipo="ENTRADA"
-        titulo="Escaner de ENTRADA"
-        :activo="activo === 'ENTRADA'"
-        @abrir="abrir('ENTRADA')"
-        @cerrar="activo = null"
-        @validado="cargarDentro()"
+        :key="modo"
+        :tipo="modo"
+        :titulo="modo === 'ENTRADA' ? 'Escáner de ENTRADA' : 'Escáner de SALIDA'"
+        :activo="activo"
+        @abrir="activo = true"
+        @cerrar="activo = false"
       />
-      <PanelEscaneo
-        ref="refSalida"
-        tipo="SALIDA"
-        titulo="Escaner de SALIDA"
-        :activo="activo === 'SALIDA'"
-        @abrir="abrir('SALIDA')"
-        @cerrar="activo = null"
-        @validado="cargarDentro()"
-      />
-    </div>
-
-    <div class="card">
-      <h3>Personas dentro del recinto ({{ dentro.length }})</h3>
-      <TablaDatos
-        :columnas="columnas"
-        :filas="dentro"
-        clave="idTicket"
-        :con-acciones="false"
-        :cargando="cargandoDentro"
-        texto-vacio="Nadie dentro del recinto."
-        placeholder-busqueda="Buscar persona o codigo..."
-      >
-        <template #col-categoria="{ valor }">{{ nombreCategoria(String(valor)) }}</template>
-        <template #col-entrada="{ valor }">{{ hora(valor ? String(valor) : undefined) }}</template>
-      </TablaDatos>
     </div>
 
     <ConsultaRu :abierto="mostrarConsultaRu" @cerrar="mostrarConsultaRu = false" />
@@ -123,28 +65,19 @@ const columnas = [
 </template>
 
 <style scoped>
-.control { display: flex; flex-direction: column; gap: 16px; }
+.control { display: flex; flex-direction: column; gap: 12px; }
 
-.cabecera {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
+/* Barra mínima: selector de modo + botón RU, en una sola fila. */
+.barra { display: flex; align-items: center; gap: 8px; }
+.modo { flex: 1 1 auto; min-width: 0; }
 
-.subtitulo { color: var(--texto-suave); margin-top: -10px; font-size: 14px; }
+.consultar-ru { white-space: nowrap; flex-shrink: 0; min-height: 44px; }
 
-.consultar-ru { white-space: nowrap; }
-
+/* Un solo panel visible (según el modo): ocupa todo el ancho. */
 .columnas {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
-}
-
-@media (max-width: 1000px) {
-  .columnas { grid-template-columns: 1fr; }
 }
 </style>

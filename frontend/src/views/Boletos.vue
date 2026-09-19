@@ -28,8 +28,9 @@ import type {
   BoletoDto,
   DiaFeria,
   PrevisualizacionBoletoCsvDto,
+  TipoBoleto,
 } from '@/types/boleto.type'
-import { ETIQUETA_DIA_FERIA } from '@/types/boleto.type'
+import { ETIQUETA_DIA_FERIA, ETIQUETA_TIPO_BOLETO } from '@/types/boleto.type'
 import type { ImportacionResultadoDto } from '@/types/estudiante.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
@@ -50,6 +51,9 @@ const previsualizando = ref(false)
 // Filtro dentro/fuera y por categoría
 const filtroEstado = ref<'' | 'dentro' | 'fuera'>('')
 const filtroCategoria = ref<'' | 'PARTICULAR' | 'ADMINISTRATIVO' | 'DOCENTE'>('')
+// Feria/parqueo: los códigos pueden repetirse entre tipos, el tipo distingue
+// dos filas que se ven iguales.
+const filtroTipo = ref<'' | TipoBoleto>('')
 
 // Asociación a administrativos/docentes (los 3 boletos que se entregan junto
 // con el ticket QR, uno por día). Sin vista previa: son CSV chicos (uno por
@@ -63,17 +67,18 @@ const resultadoDocente = ref<ImportacionResultadoDto | null>(null)
 
 // Modal alta suelta
 const mostrarModal = ref(false)
-const form = ref<BoletoDto>({ codigo: '' })
+const form = ref({ codigo: '', diaFeria: '' as DiaFeria | '', tipoBoleto: 'FERIA' as TipoBoleto })
 const errorForm = ref('')
 
 // Detalle de una persona (administrativo/docente): sus 3 boletos, uno por día.
 const detalleAbierto = ref<FilaBoletoAgrupada | null>(null)
 
 const columnas: ColumnaTabla[] = [
-  { clave: 'identificador', titulo: 'Código / Persona', ancho: '260px' },
-  { clave: 'categoria', titulo: 'Categoría', ancho: '140px' },
-  { clave: 'estadoDias', titulo: 'Estado / Días', ancho: '220px', buscable: false, ordenable: false },
-  { clave: 'ultimoTipo', titulo: 'Último movimiento', ancho: '200px', buscable: false },
+  { clave: 'identificador', titulo: 'C��digo / Persona', ancho: '260px' },
+  { clave: 'tipo', titulo: 'Tipo', ancho: '110px' },
+  { clave: 'categoria', titulo: 'Categor��a', ancho: '140px' },
+  { clave: 'estadoDias', titulo: 'Estado / D��as', ancho: '220px', buscable: false, ordenable: false },
+  { clave: 'ultimoTipo', titulo: '�sltimo movimiento', ancho: '200px', buscable: false },
 ]
 
 // Agrupa: administrativos/docentes en UNA fila por persona (sus 3 boletos
@@ -91,6 +96,7 @@ const filas = computed(() => {
   if (filtroEstado.value === 'dentro') f = f.filter((x) => (x.esPersona ? x.algunoDentro : x.dentro))
   else if (filtroEstado.value === 'fuera') f = f.filter((x) => (x.esPersona ? !x.algunoDentro : !x.dentro))
   if (filtroCategoria.value) f = f.filter((x) => x.categoria === filtroCategoria.value)
+  if (filtroTipo.value) f = f.filter((x) => x.tipo === filtroTipo.value)
   return f
 })
 
@@ -189,15 +195,24 @@ async function asociarDocentes() {
 }
 
 function nuevo() {
-  form.value = { codigo: '' }
+  form.value = { codigo: '', diaFeria: '', tipoBoleto: 'FERIA' }
   errorForm.value = ''
   mostrarModal.value = true
 }
 
 async function guardar() {
   errorForm.value = ''
+  if (!form.value.diaFeria) {
+    errorForm.value = 'Elegí el día en que vale el boleto'
+    return
+  }
+  const dto: BoletoDto = {
+    codigo: form.value.codigo,
+    diaFeria: form.value.diaFeria,
+    tipoBoleto: form.value.tipoBoleto,
+  }
   try {
-    await crearBoleto(form.value)
+    await crearBoleto(dto)
     mostrarModal.value = false
     alertas.exito('Boleto creado')
     await cargar()
@@ -261,8 +276,10 @@ onMounted(cargar)
     <div class="card" style="margin-bottom:16px">
       <strong>Carga masiva por CSV</strong>
       <p class="ayuda">
-        Dos columnas: el <code>código</code> del boleto y el <code>día</code> en que vale
-        (<code>1</code>, <code>2</code> o <code>3</code>). Si la primera fila es el encabezado
+        Tres columnas: el <code>código</code> del boleto, el <code>día</code> en que vale
+        (<code>1</code>, <code>2</code> o <code>3</code>) y el <code>tipo</code>
+        (<code>FERIA</code> o <code>PARQUEO</code>, opcional: si no viene se asume
+        feria). Si la primera fila es el encabezado
         se saltea sola. Volver a subir el mismo listado no falla y <strong>corrige el día</strong>
         si cambió, sin tocar el estado dentro/fuera.
         <br />
@@ -324,6 +341,7 @@ onMounted(cargar)
                 <th style="width:50px">#</th>
                 <th>Código</th>
                 <th style="width:90px">Día</th>
+                <th style="width:110px">Tipo</th>
                 <th style="width:150px">Acción</th>
               </tr>
             </thead>
@@ -335,6 +353,7 @@ onMounted(cargar)
                   <span v-if="f.diaFeria">{{ f.diaFeria.replace('DIA_', 'Día ') }}</span>
                   <span v-else class="error">falta</span>
                 </td>
+                <td>{{ f.tipo ? (ETIQUETA_TIPO_BOLETO[f.tipo as TipoBoleto] ?? f.tipo) : '—' }}</td>
                 <td>
                   <span v-if="f.estado === 'NUEVO'" class="chip" style="background:#dcfce7;color:#166534">
                     Nuevo
@@ -444,6 +463,11 @@ onMounted(cargar)
           <option value="ADMINISTRATIVO">Administrativos ({{ administrativosCount }})</option>
           <option value="DOCENTE">Docentes ({{ docentesCount }})</option>
         </select>
+        <select v-model="filtroTipo" style="max-width:160px" aria-label="Filtrar por tipo">
+          <option value="">Feria + parqueo</option>
+          <option value="FERIA">Feria</option>
+          <option value="PARQUEO">Parqueo</option>
+        </select>
       </template>
 
       <template #col-identificador="{ fila }">
@@ -455,6 +479,11 @@ onMounted(cargar)
         <span v-if="valor === 'PARTICULAR'" class="chip">Particular</span>
         <span v-else-if="valor === 'ADMINISTRATIVO'" class="chip" style="background:#ede9fe;color:#5b21b6">Administrativo</span>
         <span v-else class="chip" style="background:#fef3c7;color:#92400e">Docente</span>
+      </template>
+
+      <template #col-tipo="{ valor }">
+        <span v-if="valor === 'PARQUEO'" class="chip" style="background:#ffedd5;color:#9a3412">Parqueo</span>
+        <span v-else class="chip">Feria</span>
       </template>
 
       <!-- Particular: chip Dentro/Fuera. Persona: 3 badges de día, uno por
@@ -505,6 +534,18 @@ onMounted(cargar)
     <ModalBase v-if="mostrarModal" titulo="Nuevo boleto" @cerrar="mostrarModal = false">
       <form id="form-boleto" @submit.prevent="guardar">
         <label>Código *</label><input v-model="form.codigo" required autofocus />
+        <label>Día en que vale *</label>
+        <select v-model="form.diaFeria" required>
+          <option value="" disabled>Elegir día…</option>
+          <option value="DIA_1">Día 18</option>
+          <option value="DIA_2">Día 19</option>
+          <option value="DIA_3">Día 20</option>
+        </select>
+        <label>Tipo *</label>
+        <select v-model="form.tipoBoleto" required>
+          <option value="FERIA">Feria</option>
+          <option value="PARQUEO">Parqueo</option>
+        </select>
         <Alerta v-if="errorForm" tipo="error">{{ errorForm }}</Alerta>
       </form>
       <template #pie>

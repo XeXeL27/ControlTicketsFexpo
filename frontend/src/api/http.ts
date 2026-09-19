@@ -8,7 +8,10 @@ import { auth } from '@/store/auth'
 import router from '@/router'
 
 const http = axios.create({
-  baseURL: '/api', // el proxy de Vite reenvia /api al backend
+  // En desarrollo web: '/api' relativo (lo atiende el proxy de Vite).
+  // En el APK (Capacitor): no hay proxy, así que se hornea la URL pública
+  // del servidor al compilar: VITE_API_URL=https://servidor.com/api
+  baseURL: import.meta.env.VITE_API_URL || '/api',
 })
 
 // --- Interceptor de peticion: adjunta el token ---
