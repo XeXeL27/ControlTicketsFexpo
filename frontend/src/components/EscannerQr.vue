@@ -20,6 +20,10 @@ const emit = defineEmits<{ 'codigo': [codigo: string] }>()
 const video = ref<HTMLVideoElement | null>(null)
 const error = ref('')
 const encendiendo = ref(false)
+// Linterna/flash del celular (torch del track de video). Solo algunos
+// navegadores Android la exponen; si no hay soporte el boton se oculta.
+const linternaEncendida = ref(false)
+const linternaDisponible = ref(false)
 
 let lector: BrowserQRCodeReader | null = null
 let controls: IScannerControls | null = null
@@ -30,12 +34,43 @@ let ultimaLectura = 0
 
 async function detener(): Promise<void> {
   generacion++
+  linternaEncendida.value = false
+  linternaDisponible.value = false
   controls?.stop()
   controls = null
   if (video.value?.srcObject) {
     const stream = video.value.srcObject as MediaStream
     stream.getTracks().forEach((t) => t.stop())
     video.value.srcObject = null
+  }
+}
+
+/** Track de video activo del elemento <video>. */
+function trackVideo(): MediaStreamTrack | null {
+  const stream = video.value?.srcObject as MediaStream | null
+  return stream?.getVideoTracks()?.[0] ?? null
+}
+
+/** Revisa si el track actual soporta torch y actualiza el boton. */
+function actualizarDisponibilidadLinterna(): void {
+  const track = trackVideo()
+  const capacidades = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined
+  linternaDisponible.value = capacidades?.torch === true
+  if (!linternaDisponible.value) linternaEncendida.value = false
+}
+
+/** Enciende/apaga la linterna del celular. */
+async function alternarLinterna(): Promise<void> {
+  const track = trackVideo()
+  if (!track) return
+  const encender = !linternaEncendida.value
+  try {
+    await track.applyConstraints({ advanced: [{ torch: encender } as MediaTrackConstraintSet] })
+    linternaEncendida.value = encender
+  } catch {
+    // Si el equipo rechaza el constraint, se oculta el boton.
+    linternaDisponible.value = false
+    linternaEncendida.value = false
   }
 }
 
@@ -62,7 +97,10 @@ async function encender(): Promise<void> {
       }
     })
     if (desmontado || intento !== generacion || document.hidden) nuevosControles.stop()
-    else controls = nuevosControles
+    else {
+      controls = nuevosControles
+      actualizarDisponibilidadLinterna()
+    }
   } catch (e) {
     const err = e as { name?: string; message?: string }
     const mensaje =
@@ -97,6 +135,16 @@ onBeforeUnmount(() => {
   <div class="escanner">
     <video ref="video" class="video" muted playsinline></video>
 
+    <button
+      v-if="linternaDisponible && !error"
+      type="button"
+      class="linterna"
+      :class="{ 'linterna--activa': linternaEncendida }"
+      :aria-pressed="linternaEncendida"
+      @click="alternarLinterna"
+    >
+      {{ linternaEncendida ? 'Apagar linterna' : 'Encender linterna' }}
+    </button>
     <p v-if="encendiendo" class="estado">Encendiendo camara...</p>
     <div v-if="error" class="estado error">
       <p>{{ error }}</p>
@@ -128,6 +176,7 @@ onBeforeUnmount(() => {
 .velo {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -150,5 +199,24 @@ onBeforeUnmount(() => {
   top: 10px;
   bottom: auto;
   color: #fca5a5;
+}
+/* Boton de linterna/flash sobre el video (solo aparece si el equipo la soporta). */
+.linterna {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  min-height: 44px;
+}
+.linterna--activa {
+  background: #facc15;
+  color: #111;
 }
 </style>
