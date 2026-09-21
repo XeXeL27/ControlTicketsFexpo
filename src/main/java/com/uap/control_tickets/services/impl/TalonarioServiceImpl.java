@@ -222,7 +222,6 @@ public class TalonarioServiceImpl implements TalonarioService {
     @Transactional
     public ResultadoMarcadoDto marcar(MarcarVentaDto dto) {
         Talonario t = buscar(dto.getIdTalonario());
-        verificarPuedeOperar(t);
 
         Set<Integer> numeros = numerosAMarcar(dto, t);
         if (numeros.isEmpty()) {

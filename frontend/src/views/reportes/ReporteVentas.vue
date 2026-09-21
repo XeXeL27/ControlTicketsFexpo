@@ -67,6 +67,50 @@ function montoCorto(valor?: number | null): string {
   return valor != null ? `Bs ${valor}` : '—'
 }
 
+interface FilaPdfVentas {
+  dia: string
+  tipoBoleto: string
+  total: number
+  vendidos: number
+  disponibles: number
+  anulados: number
+  monto: number
+  tieneMonto: boolean
+}
+
+function filasPdfGeneral(): FilaPdfVentas[] {
+  const grupos = new Map<string, FilaPdfVentas>()
+  for (const t of reporte.value?.talonarios ?? []) {
+    const dia = t.tipoEtiqueta
+    const tipoBoleto = t.destinoEtiqueta
+    const clave = `${dia}__${tipoBoleto}`
+    const fila = grupos.get(clave) ?? {
+      dia,
+      tipoBoleto,
+      total: 0,
+      vendidos: 0,
+      disponibles: 0,
+      anulados: 0,
+      monto: 0,
+      tieneMonto: false,
+    }
+
+    fila.total += t.cantidad
+    fila.vendidos += t.vendidos
+    fila.disponibles += t.disponibles
+    fila.anulados += t.anulados
+    if (t.montoVendido != null) {
+      fila.monto += t.montoVendido
+      fila.tieneMonto = true
+    }
+    grupos.set(clave, fila)
+  }
+
+  return Array.from(grupos.values()).sort((a, b) =>
+    a.dia.localeCompare(b.dia, 'es') || a.tipoBoleto.localeCompare(b.tipoBoleto, 'es'),
+  )
+}
+
 async function cargar(): Promise<void> {
   cargando.value = true
   error.value = ''
@@ -79,7 +123,7 @@ async function cargar(): Promise<void> {
   }
 }
 
-/** Arma el PDF (resumen + por vendedora + por talonario) y lo descarga. */
+/** Arma el PDF consolidado por dia/evento y tipo de boleto; la vista queda por talonario. */
 async function exportarPdf(): Promise<void> {
   if (!reporte.value || exportando.value) return
   exportando.value = true
@@ -87,40 +131,49 @@ async function exportarPdf(): Promise<void> {
     const doc = new jsPDF({ orientation: 'landscape' })
     const inicio = await encabezadoReporte(
       doc,
-      'Reporte de ventas — Talonarios',
-      'Todos los talonarios con su avance; montos en bolivianos (Bs).',
+      'Reporte general de ventas',
+      'Consolidado por dia/evento y tipo de boleto; montos en bolivianos (Bs).',
     )
 
     autoTable(doc, {
       startY: inicio,
       ...estilosTablaReporte(),
-      head: [['Vendedora', 'Boletos vendidos', 'Monto (Bs)']],
-      body: (reporte.value.porVendedora ?? []).map((v) => [v.vendedora, v.vendidos, v.monto]),
-      foot: [[
-        'TOTAL',
+      head: [['Concepto', 'Total boletos', 'Vendidos', 'Disponibles', 'Anulados', 'Monto (Bs)']],
+      body: [[
+        'General',
+        reporte.value.totalBoletos,
         reporte.value.totalVendidos,
+        reporte.value.totalDisponibles,
+        reporte.value.totalAnulados,
         reporte.value.totalMontoVendido ?? '—',
       ]],
     })
 
     autoTable(doc, {
       ...estilosTablaReporte(),
-      head: [['Talonario', 'Destino', 'Evento', 'Rango', 'A cargo', 'Vendidos', 'Disponibles', 'Anulados', 'Monto (Bs)']],
-      body: (reporte.value.talonarios ?? []).map((t) => [
-        t.nombre,
-        t.destinoEtiqueta,
-        t.tipoEtiqueta,
-        `${t.numeroDesde}–${t.numeroHasta}`,
-        t.usuarioAsignado ?? 'Sin asignar',
-        t.vendidos,
-        t.disponibles,
-        t.anulados,
-        t.montoVendido ?? '—',
+      head: [['Dia / evento', 'Tipo de boleto', 'Total boletos', 'Vendidos', 'Disponibles', 'Anulados', 'Monto (Bs)']],
+      body: filasPdfGeneral().map((f) => [
+        f.dia,
+        f.tipoBoleto,
+        f.total,
+        f.vendidos,
+        f.disponibles,
+        f.anulados,
+        f.tieneMonto ? f.monto : '—',
       ]),
+      foot: [[
+        'TOTAL',
+        '',
+        reporte.value.totalBoletos,
+        reporte.value.totalVendidos,
+        reporte.value.totalDisponibles,
+        reporte.value.totalAnulados,
+        reporte.value.totalMontoVendido ?? '—',
+      ]],
     })
 
     pieReporte(doc)
-    doc.save('reporte-ventas-talonarios.pdf')
+    doc.save('reporte-general-ventas.pdf')
     alertas.exito('PDF descargado')
   } catch (e) {
     alertas.error(mensajeError(e, 'No se pudo generar el PDF'))

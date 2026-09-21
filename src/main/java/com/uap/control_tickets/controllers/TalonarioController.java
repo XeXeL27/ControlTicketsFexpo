@@ -105,8 +105,7 @@ public class TalonarioController {
     @PatchMapping("/marcar")
     @Operation(summary = "Marcar boletos como vendidos, anulados o disponibles",
             description = "Tres formas: hastaNumero ('vendidos hasta el 137'), desde+hasta "
-                    + "(un rango) o numeros (sueltos, uno por uno). Se pueden combinar. "
-                    + "Una vendedora solo puede marcar los talonarios asignados a ella.")
+                    + "(un rango) o numeros (sueltos, uno por uno). Se pueden combinar.")
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'VENTA_FERIA')")
     public ResponseEntity<ResultadoMarcadoDto> marcar(@Valid @RequestBody MarcarVentaDto dto) {
         return ResponseEntity.ok(talonarioService.marcar(dto));

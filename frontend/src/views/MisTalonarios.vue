@@ -31,6 +31,9 @@ const cargando = ref(false)
 const marcando = ref(false)
 const error = ref('')
 
+/** Buscador del selector de talonarios. */
+const busquedaTalonario = ref('')
+
 /** Buscador: filtra la grilla por número (lo primero que uno espera del input de arriba). */
 const busqueda = ref('')
 
@@ -48,6 +51,22 @@ const ESTADOS: { valor: EstadoVenta; nombre: string; clase: string }[] = [
   { valor: 'DISPONIBLE', nombre: 'Disponible', clase: 'disponible' },
   { valor: 'ANULADO', nombre: 'Anulado', clase: 'anulado' },
 ]
+
+const talonariosFiltrados = computed(() => {
+  const q = busquedaTalonario.value.trim().toLowerCase()
+  if (!q) return talonarios.value
+  return talonarios.value.filter((t) => {
+    const rango = `${t.numeroDesde}-${t.numeroHasta}`
+    return [
+      t.nombre,
+      t.destinoEtiqueta,
+      t.tipoEtiqueta,
+      rango,
+      String(t.numeroDesde),
+      String(t.numeroHasta),
+    ].some((valor) => valor.toLowerCase().includes(q))
+  })
+})
 
 const boletosFiltrados = computed(() => {
   let lista = boletos.value
@@ -91,7 +110,7 @@ async function cargar() {
   cargando.value = true
   error.value = ''
   try {
-    talonarios.value = await listarTalonarios(undefined, undefined, true)
+    talonarios.value = await listarTalonarios()
     if (talonarios.value.length && !seleccionado.value) {
       await elegir(talonarios.value[0])
     } else if (seleccionado.value) {
@@ -200,13 +219,28 @@ onMounted(cargar)
     <Alerta v-if="error" tipo="error">{{ error }}</Alerta>
 
     <p v-if="!cargando && !talonarios.length" class="vacio">
-      No tiene talonarios asignados. Pídale al administrador que le asigne uno.
+      No hay talonarios registrados.
+    </p>
+
+    <div v-if="talonarios.length" class="buscador-talonarios">
+      <input
+        v-model="busquedaTalonario"
+        type="search"
+        placeholder="Buscar talonario, evento, destino o rango..."
+        aria-label="Buscar talonario"
+      />
+      <button v-if="busquedaTalonario" class="secundario" @click="busquedaTalonario = ''">
+        Limpiar
+      </button>
+    </div>
+    <p v-if="talonarios.length && !talonariosFiltrados.length" class="vacio">
+      No hay talonarios que coincidan con la busqueda.
     </p>
 
     <!-- Selector de talonario: tarjetas grandes, cómodas con el dedo -->
-    <div v-if="talonarios.length > 1" class="selector">
+    <div v-if="talonariosFiltrados.length > 1" class="selector">
       <button
-        v-for="t in talonarios"
+        v-for="t in talonariosFiltrados"
         :key="t.idTalonario"
         class="chip-talonario"
         :class="{ activo: seleccionado?.idTalonario === t.idTalonario }"
@@ -353,6 +387,7 @@ onMounted(cargar)
         <span class="conteo">{{ seleccion.size }} seleccionado(s)</span>
         <div class="botones">
           <button class="secundario" @click="seleccion = new Set()">Limpiar</button>
+          <button class="secundario" :disabled="marcando" @click="marcar('DISPONIBLE', 'seleccion')">Disponible</button>
           <button class="peligro" :disabled="marcando" @click="marcar('ANULADO', 'seleccion')">Anular</button>
           <button :disabled="marcando" @click="marcar('VENDIDO', 'seleccion')">Vendidos</button>
         </div>
@@ -367,6 +402,16 @@ onMounted(cargar)
 .ayuda { color: var(--texto-suave); font-size: 13px; margin: 6px 0; }
 
 /* Selector de talonarios */
+.buscador-talonarios {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.buscador-talonarios input {
+  flex: 1 1 240px;
+  min-height: 42px;
+}
 .selector { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; }
 .chip-talonario {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;

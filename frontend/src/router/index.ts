@@ -46,6 +46,7 @@ import PulsoFexpo from '@/views/control/PulsoFexpo.vue'
 // --- Reportes (ingresos por día, exportables a PDF) ---
 import ReporteFeria from '@/views/reportes/ReporteFeria.vue'
 import ReporteConcierto from '@/views/reportes/ReporteConcierto.vue'
+import ReporteEstudiantes from '@/views/reportes/ReporteEstudiantes.vue'
 import ReporteVentas from '@/views/reportes/ReporteVentas.vue'
 
 // Grupos de roles permitidos por ruta (meta.roles). Sin `roles` = cualquier
@@ -101,6 +102,7 @@ const routes: RouteRecordRaw[] = [
   // concierto para CONTROL_CONCIERTO, ventas solo ADMINISTRADOR; el admin ve todo.
   { path: '/reportes/feria', component: ReporteFeria, meta: { roles: FERIA } },
   { path: '/reportes/concierto', component: ReporteConcierto, meta: { roles: CONCIERTO } },
+  { path: '/reportes/estudiantes', component: ReporteEstudiantes, meta: { roles: CONCIERTO } },
   { path: '/reportes/ventas', component: ReporteVentas, meta: { roles: ADMIN } },
 ]
 

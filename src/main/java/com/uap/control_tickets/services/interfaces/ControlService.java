@@ -4,6 +4,7 @@ import com.uap.control_tickets.apivalidacaion.Dto.ApiResponseDto;
 import com.uap.control_tickets.dto.control.DetalleIngresoConciertoDto;
 import com.uap.control_tickets.dto.control.PersonaDentroDto;
 import com.uap.control_tickets.dto.control.ReporteIngresosConciertoDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosEstudiantesDto;
 import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ValidacionTicketDto;
 import com.uap.control_tickets.enums.CategoriaTicket;
@@ -47,6 +48,13 @@ public interface ControlService {
      * categoría. Una fila por ticket con sus entradas y su última entrada.
      */
     List<DetalleIngresoConciertoDto> detalleIngresos(DiaFeria dia, CategoriaTicket categoria);
+
+    /**
+     * ENTRADAS de ESTUDIANTE agrupadas por carrera, en el día pedido (o en los
+     * 3 días si dia es null). Una fila por carrera con tickets distintos y suma
+     * de ENTRADAS, más los totales. Base del reporte "Estudiantes por carrera".
+     */
+    ReporteIngresosEstudiantesDto reporteEstudiantesPorCarrera(DiaFeria dia);
 
     /**
      * Regulariza UN ingreso QR: registra una ENTRADA con la fecha del día

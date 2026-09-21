@@ -245,6 +245,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <div v-show="seccionesAbiertas.reportes" :id="'sec-reportes'" class="menu-enlaces">
             <router-link v-if="verFeria" to="/reportes/feria">Ingresos feria y parqueo</router-link>
             <router-link v-if="verConcierto" to="/reportes/concierto">Ingresos concierto</router-link>
+            <router-link v-if="verConcierto" to="/reportes/estudiantes">Estudiantes por carrera</router-link>
             <router-link v-if="esAdmin" to="/reportes/ventas">Ventas por talonario</router-link>
           </div>
           </div>

@@ -16,7 +16,7 @@ const http = axios.create({
 
 // --- Interceptor de peticion: adjunta el token ---
 http.interceptors.request.use((config) => {
-  if (auth.token) {
+  if (auth.token && config.url !== '/auth/login') {
     config.headers.Authorization = `Bearer ${auth.token}`
   }
   return config

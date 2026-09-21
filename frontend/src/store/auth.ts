@@ -36,6 +36,10 @@ export const auth = reactive<EstadoAuth>({
 
   // Guarda la sesion tras un login exitoso.
   login(tokenDto: TokenDto): void {
+    if (!tokenDto?.token || !Array.isArray(tokenDto.roles)) {
+      throw new Error('Respuesta de login invalida')
+    }
+
     this.token = tokenDto.token
     this.usuario = {
       idUsuario: tokenDto.idUsuario,

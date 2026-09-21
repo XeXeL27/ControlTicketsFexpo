@@ -6,6 +6,8 @@ import com.uap.control_tickets.dto.control.MovimientoAccesoDto;
 import com.uap.control_tickets.dto.control.DetalleIngresoConciertoDto;
 import com.uap.control_tickets.dto.control.IngresosDiaConciertoDto;
 import com.uap.control_tickets.dto.control.ReporteIngresosConciertoDto;
+import com.uap.control_tickets.dto.control.IngresosPorCarreraDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosEstudiantesDto;
 import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.PersonaDentroDto;
 import com.uap.control_tickets.dto.control.ValidacionTicketDto;
@@ -282,6 +284,41 @@ public class ControlServiceImpl implements ControlService {
                         DetalleIngresoConciertoDto::getNombreCompleto,
                         java.util.Comparator.nullsLast(String::compareToIgnoreCase)))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReporteIngresosEstudiantesDto reporteEstudiantesPorCarrera(DiaFeria dia) {
+        // Se reutiliza el detalle nominal de ESTUDIANTE (una fila por ticket
+        // con sus ENTRADAS del rango) y se agrupa por carrera. Así el conteo
+        // coincide con el reporte del concierto y el detalle por persona.
+        List<DetalleIngresoConciertoDto> detalle = detalleIngresos(dia, CategoriaTicket.ESTUDIANTE);
+        Map<String, IngresosPorCarreraDto> porCarrera = new LinkedHashMap<>();
+        for (DetalleIngresoConciertoDto d : detalle) {
+            String carrera = d.getCarrera() == null ? "" : d.getCarrera().trim();
+            if (carrera.isEmpty()) carrera = "Sin carrera";
+            IngresosPorCarreraDto fila = porCarrera.get(carrera);
+            if (fila == null) {
+                fila = new IngresosPorCarreraDto();
+                fila.setCarrera(carrera);
+                porCarrera.put(carrera, fila);
+            }
+            fila.setEstudiantes(fila.getEstudiantes() + 1);
+            fila.setEntradas(fila.getEntradas() + d.getEntradas());
+        }
+        List<IngresosPorCarreraDto> filas = new ArrayList<>(porCarrera.values());
+        filas.sort(java.util.Comparator
+                .comparingLong(IngresosPorCarreraDto::getEstudiantes).reversed()
+                .thenComparing(IngresosPorCarreraDto::getCarrera, String.CASE_INSENSITIVE_ORDER));
+
+        ReporteIngresosEstudiantesDto r = new ReporteIngresosEstudiantesDto();
+        r.setDia(dia == null ? null : dia.name());
+        r.setFecha(dia == null ? null : calendario.fechaDe(dia));
+        r.setPorCarrera(filas);
+        r.setTotalCarreras(filas.size());
+        r.setTotalEstudiantes(detalle.size());
+        r.setTotalEntradas(detalle.stream().mapToLong(DetalleIngresoConciertoDto::getEntradas).sum());
+        return r;
     }
 
     @Override

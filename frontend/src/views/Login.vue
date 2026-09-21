@@ -14,6 +14,25 @@ const password = ref('')
 const error = ref('')
 const cargando = ref(false)
 
+function mensajeErrorLogin(e: unknown): string {
+  if (axios.isAxiosError(e)) {
+    const data = e.response?.data
+    if (data && typeof data === 'object' && 'mensaje' in data && typeof data.mensaje === 'string') {
+      return data.mensaje
+    }
+    if (e.response?.status === 401 || e.response?.status === 403) {
+      return 'Credenciales incorrectas o usuario sin permisos'
+    }
+    if (!e.response) {
+      return 'No se pudo conectar con el servidor'
+    }
+  }
+  if (e instanceof Error && e.message) {
+    return e.message
+  }
+  return 'No se pudo iniciar sesion'
+}
+
 async function ingresar() {
   error.value = ''
   cargando.value = true
@@ -22,8 +41,7 @@ async function ingresar() {
     auth.login(data)
     router.push(rutaInicio())
   } catch (e: unknown) {
-    error.value =
-      (axios.isAxiosError(e) && e.response?.data?.mensaje) || 'No se pudo iniciar sesion'
+    error.value = mensajeErrorLogin(e)
   } finally {
     cargando.value = false
   }

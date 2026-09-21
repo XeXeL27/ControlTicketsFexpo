@@ -177,3 +177,24 @@ export interface DetalleIngresoConciertoDto {
   entradas: number
   ultimaEntrada?: string | null
 }
+
+// --- Reporte de entradas de estudiantes por carrera (apartado Reportes) ---
+
+/** ENTRADAS de estudiantes de una carrera en el rango pedido. */
+export interface IngresosPorCarreraDto {
+  carrera: string
+  /** Tickets distintos con al menos una ENTRADA. */
+  estudiantes: number
+  /** Suma de ENTRADAS de esos tickets. */
+  entradas: number
+}
+
+/** Estudiantes por carrera + totales. `dia` null = los 3 días. */
+export interface ReporteIngresosEstudiantesDto {
+  dia?: string | null
+  fecha?: string | null
+  porCarrera: IngresosPorCarreraDto[]
+  totalCarreras: number
+  totalEstudiantes: number
+  totalEntradas: number
+}

@@ -5,6 +5,7 @@ import com.uap.control_tickets.dto.control.DetalleIngresoConciertoDto;
 import com.uap.control_tickets.dto.control.PersonaDentroDto;
 import com.uap.control_tickets.dto.control.RegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ReporteIngresosConciertoDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosEstudiantesDto;
 import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.enums.CategoriaTicket;
 import com.uap.control_tickets.enums.DiaFeria;
@@ -94,6 +95,19 @@ public class ControlController {
             @RequestParam(required = false) CategoriaTicket categoria) {
         return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(controlService.detalleIngresos(dia, categoria));
+    }
+
+    @GetMapping("/reporte-ingresos/estudiantes-por-carrera")
+    @Operation(summary = "Entradas de estudiantes por carrera",
+            description = "ENTRADAS de ESTUDIANTE agrupadas por carrera, del día pedido "
+                    + "(o de los 3 días si no se pasa dia). Una fila por carrera con "
+                    + "tickets distintos y suma de ENTRADAS, más los totales. Base del "
+                    + "reporte \"Estudiantes por carrera\" y de su exportación a PDF.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_CONCIERTO')")
+    public ResponseEntity<ReporteIngresosEstudiantesDto> reporteEstudiantesPorCarrera(
+            @RequestParam(required = false) DiaFeria dia) {
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(controlService.reporteEstudiantesPorCarrera(dia));
     }
 
     @GetMapping("/sigse/{ru}")

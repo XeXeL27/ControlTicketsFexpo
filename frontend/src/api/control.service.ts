@@ -8,6 +8,7 @@ import type {
   DetalleIngresoConciertoDto,
   HistorialPersonaDto,
   ReporteIngresosConciertoDto,
+  ReporteIngresosEstudiantesDto,
   ReportePersonaDto,
   PersonaDentroDto,
   RespuestaSigseDto,
@@ -76,6 +77,22 @@ export async function detalleIngresosConcierto(
     signal,
     timeout: 15000,
   })
+  return res.data
+}
+
+/**
+ * Entradas de ESTUDIANTES agrupadas por carrera, del día pedido (o de los 3
+ * días si no se pasa dia). Una fila por carrera + totales. Base del reporte
+ * "Estudiantes por carrera".
+ */
+export async function reporteEstudiantesPorCarrera(
+  dia?: string,
+  signal?: AbortSignal,
+): Promise<ReporteIngresosEstudiantesDto> {
+  const res = await http.get<ReporteIngresosEstudiantesDto>(
+    '/control/reporte-ingresos/estudiantes-por-carrera',
+    { params: { ...(dia ? { dia } : {}) }, signal, timeout: 15000 },
+  )
   return res.data
 }
 /**
