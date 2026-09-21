@@ -47,7 +47,8 @@ function seccionDeRuta(path: string): string {
   if (['/personas', '/usuarios', '/roles', '/'].includes(path)) return 'administracion'
   if (['/estudiantes', '/administrativos', '/docentes', '/impresion', '/entrega', '/huellas'].includes(path)) return 'tickets'
   if (['/control', '/control-talonarios', '/personas-dentro', '/reportes/personas'].includes(path)) return 'concierto'
-  if (['/talonarios', '/mis-talonarios'].includes(path)) return 'venta'
+  if (['/talonarios', '/mis-talonarios', '/regularizacion'].includes(path)) return 'venta'
+  if (path.startsWith('/reportes/')) return 'reportes'
   return 'feria'
 }
 
@@ -215,6 +216,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <div v-show="seccionesAbiertas.venta" :id="'sec-venta'" class="menu-enlaces">
             <router-link v-if="esAdmin" to="/talonarios">Talonarios</router-link>
             <router-link to="/mis-talonarios">Mis talonarios</router-link>
+            <router-link v-if="esAdmin" to="/regularizacion">Regularización</router-link>
           </div>
           </div>
 
@@ -230,6 +232,20 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/control-boletos">Control de boletos</router-link>
             <router-link to="/estado-boletos">Estado de boletos</router-link>
             <router-link to="/pulso-fexpo">Monitoreo FEXPO</router-link>
+          </div>
+          </div>
+
+          <div v-if="verFeria || verConcierto" class="menu-seccion">
+            <button class="menu-seccion-titulo" type="button"
+              :aria-expanded="!!seccionesAbiertas.reportes" aria-controls="sec-reportes"
+              @click="alternarSeccion('reportes')">
+              <span>Reportes</span>
+              <span class="chevron" :class="{ abierto: seccionesAbiertas.reportes }">›</span>
+            </button>
+            <div v-show="seccionesAbiertas.reportes" :id="'sec-reportes'" class="menu-enlaces">
+            <router-link v-if="verFeria" to="/reportes/feria">Ingresos feria y parqueo</router-link>
+            <router-link v-if="verConcierto" to="/reportes/concierto">Ingresos concierto</router-link>
+            <router-link v-if="esAdmin" to="/reportes/ventas">Ventas por talonario</router-link>
           </div>
           </div>
         </nav>

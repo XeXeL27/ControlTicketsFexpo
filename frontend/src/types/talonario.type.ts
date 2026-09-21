@@ -109,6 +109,54 @@ export interface ResultadoMarcadoDto {
   avisos: string[]
 }
 
+// --- Regularización de ventas (solo administrador) ---
+
+/**
+ * Marca boletos como VENDIDOS con una fecha dada y, si se indica, a nombre de
+ * un responsable. Sin responsable solo se corrige la fecha.
+ */
+export interface RegularizacionVentaDto {
+  idTalonario: number
+  idResponsable?: number | null
+  /** ISO (fecha de la venta, no futura). */
+  fechaVenta: string
+  hastaNumero?: number | null
+  desde?: number | null
+  hasta?: number | null
+  numeros?: number[]
+}
+
+export interface ResultadoRegularizacionDto {
+  solicitados: number
+  cambiados: number
+  sinCambios: number
+  avisos: string[]
+  /** null = quedaron sin responsable. */
+  responsable?: string | null
+  fechaVenta: string
+}
+
+// --- Reporte de ventas (apartado Reportes) ---
+
+/** Ventas de una vendedora en todo el evento. */
+export interface VentaVendedoraDto {
+  vendedora: string
+  vendidos: number
+  monto: number
+}
+
+/** Avance por talonario + ventas por vendedora + totales del evento. */
+export interface ReporteVentasTalonarioDto {
+  talonarios: TalonarioDetalleDto[]
+  porVendedora: VentaVendedoraDto[]
+  totalTalonarios: number
+  totalBoletos: number
+  totalVendidos: number
+  totalDisponibles: number
+  totalAnulados: number
+  totalMontoVendido?: number | null
+}
+
 /**
  * Reasignación en bloque: la lista es el estado FINAL de esa vendedora.
  * Los talonarios que van quedan a su cargo; los que hoy tiene y no van, quedan

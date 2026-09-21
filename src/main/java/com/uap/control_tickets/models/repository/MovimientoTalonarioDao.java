@@ -20,4 +20,9 @@ public interface MovimientoTalonarioDao extends JpaRepository<MovimientoTalonari
 
     long countByTipoAndEstadoAndFechaHoraBetween(
             TipoAcceso tipo, EstadoRegistro estado, Instant desde, Instant hasta);
+
+    /** ¿Ese boleto ya tiene un movimiento de ese tipo ese día? (duplicado de regularización). */
+    boolean existsByBoletoTalonarioIdBoletoTalonarioAndTipoAndEstadoAndFechaHoraBetween(
+            Long idBoletoTalonario, TipoAcceso tipo, EstadoRegistro estado,
+            Instant desde, Instant hasta);
 }

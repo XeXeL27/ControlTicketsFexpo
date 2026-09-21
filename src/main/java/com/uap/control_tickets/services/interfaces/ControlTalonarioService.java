@@ -1,6 +1,8 @@
 package com.uap.control_tickets.services.interfaces;
 
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ValidacionTalonarioDto;
+import com.uap.control_tickets.enums.DiaFeria;
 import com.uap.control_tickets.enums.TipoAcceso;
 import com.uap.control_tickets.enums.TipoTalonario;
 
@@ -27,4 +29,13 @@ public interface ControlTalonarioService {
      * En los casos bloqueados no se registra el movimiento ni se toca la BD.
      */
     ValidacionTalonarioDto validar(Integer numero, TipoTalonario tipoEvento, TipoAcceso tipoMovimiento);
+
+    /**
+     * Regulariza UN ingreso de la puerta del concierto por número: registra
+     * una ENTRADA con la fecha del día pedido (solo ADMINISTRADOR). Si el
+     * boleto ya tiene una ENTRADA ese día, se rechaza ("ya tenía registro").
+     * El "dentro" solo se toca si el día pedido es hoy.
+     */
+    ResultadoRegularizacionAccesoDto regularizarIngreso(
+            Integer numero, TipoTalonario tipoEvento, DiaFeria dia);
 }

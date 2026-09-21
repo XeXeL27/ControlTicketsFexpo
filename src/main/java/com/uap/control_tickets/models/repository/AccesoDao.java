@@ -57,4 +57,49 @@ public interface AccesoDao extends JpaRepository<Acceso, Long> {
     long countByTipoAndEstadoAndFechaHoraBetween(
             com.uap.control_tickets.enums.TipoAcceso tipo, EstadoRegistro estado,
             java.time.Instant desde, java.time.Instant hasta);
+
+    /** ¿Ese ticket ya tiene un movimiento de ese tipo ese día? (duplicado de regularización). */
+    boolean existsByTicketIdTicketAndTipoAndEstadoAndFechaHoraBetween(
+            Long idTicket,
+            com.uap.control_tickets.enums.TipoAcceso tipo, EstadoRegistro estado,
+            java.time.Instant desde, java.time.Instant hasta);
+
+    /**
+     * ENTRADAS de un rango con su ticket ya cargado (para el detalle nominal
+     * del reporte: quién entró, con cuántas entradas y cuándo fue la última).
+     */
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {
+            "ticket", "ticket.persona", "ticket.estudiante",
+            "ticket.administrativo", "ticket.docente" })
+    @org.springframework.data.jpa.repository.Query("""
+            select a from Acceso a
+            where a.tipo = :tipo and a.estado = :estado
+            and a.ticket.estado = :estado
+            and a.fechaHora >= :desde and a.fechaHora < :hasta
+            order by a.fechaHora desc
+            """)
+    List<Acceso> entradasConTicketEnRango(
+            @org.springframework.data.repository.query.Param("tipo") com.uap.control_tickets.enums.TipoAcceso tipo,
+            @org.springframework.data.repository.query.Param("estado") EstadoRegistro estado,
+            @org.springframework.data.repository.query.Param("desde") java.time.Instant desde,
+            @org.springframework.data.repository.query.Param("hasta") java.time.Instant hasta);
+    /**
+     * ENTRADAS de un rango de fechas de UNA categoría de ticket (ESTUDIANTE /
+     * ADMINISTRATIVO / DOCENTE / EXTERNO). Base del reporte de ingresos al
+     * concierto por día: el ticket vale las tres noches, así que se agrupa por
+     * fecha del escaneo, no por categoría del ticket.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+            select count(a) from Acceso a
+            where a.tipo = :tipoAcceso and a.estado = :estado
+            and a.ticket.categoria = :categoria
+            and a.ticket.estado = :estado
+            and a.fechaHora >= :desde and a.fechaHora < :hasta
+            """)
+    long contarPorCategoria(
+            @org.springframework.data.repository.query.Param("tipoAcceso") com.uap.control_tickets.enums.TipoAcceso tipoAcceso,
+            @org.springframework.data.repository.query.Param("estado") EstadoRegistro estado,
+            @org.springframework.data.repository.query.Param("categoria") com.uap.control_tickets.enums.CategoriaTicket categoria,
+            @org.springframework.data.repository.query.Param("desde") java.time.Instant desde,
+            @org.springframework.data.repository.query.Param("hasta") java.time.Instant hasta);
 }

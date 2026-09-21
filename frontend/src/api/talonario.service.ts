@@ -6,8 +6,11 @@ import type {
   DestinoTalonario,
   GeneracionTalonariosDto,
   MarcarVentaDto,
+  RegularizacionVentaDto,
+  ReporteVentasTalonarioDto,
   ResultadoAsignacionDto,
   ResultadoMarcadoDto,
+  ResultadoRegularizacionDto,
   TalonarioActualizarDto,
   TalonarioDetalleDto,
   TalonarioDto,
@@ -60,6 +63,19 @@ export function boletosDeTalonario(idTalonario: number) {
 
 export function marcarVenta(dto: MarcarVentaDto) {
   return http.patch<ResultadoMarcadoDto>('/talonarios/marcar', dto).then((r) => r.data)
+}
+
+/** Reporte de todos los talonarios vendidos (solo administrador). */
+export function reporteVentasTalonarios() {
+  return http.get<ReporteVentasTalonarioDto>('/talonarios/reporte-ventas').then((r) => r.data)
+}
+
+/**
+ * Regulariza boletos vendidos: los deja VENDIDOS a nombre del responsable y
+ * con la fecha dados (solo administrador).
+ */
+export function regularizarVenta(dto: RegularizacionVentaDto) {
+  return http.patch<ResultadoRegularizacionDto>('/talonarios/regularizar', dto).then((r) => r.data)
 }
 
 /**

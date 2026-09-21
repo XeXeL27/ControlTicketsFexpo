@@ -36,4 +36,16 @@ public interface TalonarioService {
 
     /** Marca boletos como vendidos/anulados/disponibles (por rango, hasta N, o sueltos). */
     ResultadoMarcadoDto marcar(MarcarVentaDto dto);
+
+    /**
+     * Reporte de todos los talonarios vendidos: avance por talonario, ventas
+     * por vendedora y totales del evento.
+     */
+    ReporteVentasTalonarioDto reporteVentas();
+
+    /**
+     * Regulariza ventas: marca boletos como VENDIDOS a nombre de un
+     * responsable y con una fecha dados (solo ADMINISTRADOR).
+     */
+    ResultadoRegularizacionDto regularizar(RegularizacionVentaDto dto);
 }

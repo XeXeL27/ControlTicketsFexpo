@@ -1,5 +1,6 @@
 package com.uap.control_tickets.services.impl;
 
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ValidacionTalonarioDto;
 import com.uap.control_tickets.enums.DestinoTalonario;
 import com.uap.control_tickets.enums.DiaFeria;
@@ -136,6 +137,64 @@ public class ControlTalonarioServiceImpl implements ControlTalonarioService {
         dto.setUltimaFecha(mov.getFechaHora());
         if (boleto.isDentro()) dto.setEntrada(mov.getFechaHora());
         return dto;
+    }
+
+    @Override
+    @Transactional
+    public ResultadoRegularizacionAccesoDto regularizarIngreso(
+            Integer numero, TipoTalonario tipoEvento, DiaFeria dia) {
+        if (numero == null || numero <= 0) {
+            throw new NegocioException("Ingrese el número del boleto");
+        }
+        if (tipoEvento == null) {
+            throw new NegocioException("Indique el evento (EVENTO_1, EVENTO_2, EVENTO_3 o COMBO)");
+        }
+        if (dia == null) {
+            throw new NegocioException("Indique el día del ingreso");
+        }
+        List<BoletoTalonario> candidatos = boletoTalonarioDao.buscarParaPuerta(
+                DESTINO, tipoEvento, numero, EstadoRegistro.ACTIVO);
+        if (candidatos.isEmpty()) {
+            throw new RecursoNoEncontradoException("No existe el boleto " + numero
+                    + " para " + tipoEvento.etiqueta() + " (" + DESTINO.etiqueta() + ")");
+        }
+        BoletoTalonario boleto = candidatos.get(0);
+        var fecha = calendario.fechaDe(dia);
+        if (fecha == null) {
+            throw new NegocioException("El " + calendario.describir(dia)
+                    + " no tiene fecha configurada");
+        }
+        Instant desde = fecha.atStartOfDay(calendario.zona()).toInstant();
+        Instant hasta = fecha.plusDays(1).atStartOfDay(calendario.zona()).toInstant();
+        if (movimientoTalonarioDao
+                .existsByBoletoTalonarioIdBoletoTalonarioAndTipoAndEstadoAndFechaHoraBetween(
+                        boleto.getIdBoletoTalonario(), TipoAcceso.ENTRADA,
+                        EstadoRegistro.ACTIVO, desde, hasta)) {
+            throw new NegocioException("El boleto " + numero + " (" + tipoEvento.etiqueta()
+                    + ") ya tiene un ingreso registrado " + calendario.describir(dia));
+        }
+
+        Instant cuando = calendario.momentoEnDia(fecha);
+        MovimientoTalonario mov = new MovimientoTalonario();
+        mov.setBoletoTalonario(boleto);
+        mov.setTipo(TipoAcceso.ENTRADA);
+        mov.setFechaHora(cuando);
+        movimientoTalonarioDao.save(mov);
+
+        // El "dentro" solo se toca si el día regularizado es hoy.
+        if (dia.equals(calendario.diaDeHoy())) {
+            if (boleto.isDentro() && esDentroVencido(boleto)) boleto.setDentro(false);
+            boleto.setDentro(true);
+            boletoTalonarioDao.save(boleto);
+        }
+
+        log.info("Ingreso regularizado: boleto {} de {}/{}, {}.",
+                numero, DESTINO, tipoEvento, calendario.describir(dia));
+        ResultadoRegularizacionAccesoDto r = new ResultadoRegularizacionAccesoDto();
+        r.setIdentificador(numero + " (" + tipoEvento.etiqueta() + ")");
+        r.setDia(dia.name());
+        r.setFechaHora(cuando);
+        return r;
     }
 
     /** EVENTO_1/2/3 cae en DIA_1/2/3 (mismas fechas de la feria). */

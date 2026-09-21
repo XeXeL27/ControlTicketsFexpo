@@ -5,13 +5,17 @@
 // la vista debe recoger el error.response.data como ValidacionTicketDto.
 import http from '@/api/http'
 import type {
+  DetalleIngresoConciertoDto,
   HistorialPersonaDto,
+  ReporteIngresosConciertoDto,
   ReportePersonaDto,
   PersonaDentroDto,
   RespuestaSigseDto,
+  ResultadoRegularizacionAccesoDto,
   TipoMovimiento,
   ValidacionTicketDto,
 } from '@/types/control.type'
+import type { DiaFeria } from '@/types/boleto.type'
 
 /**
  * Valida el codigo escaneado (qr_token) con el escaner dedicado (tipoMovimiento).
@@ -44,6 +48,49 @@ export async function historialPersona(idPersona: number, pagina = 0, signal?: A
   const res = await http.get<HistorialPersonaDto>(`/control/reportes/personas/${idPersona}/historial`, {
     params: { pagina }, signal, timeout: 10000,
   })
+  return res.data
+}
+
+/**
+ * Ingresos (solo ENTRADAS) al concierto de los 3 días del evento, por
+ * categoría (estudiantes, administrativos, docentes, particulares).
+ * Base del apartado "Reportes".
+ */
+export async function reporteIngresosConcierto(signal?: AbortSignal): Promise<ReporteIngresosConciertoDto> {
+  const res = await http.get<ReporteIngresosConciertoDto>('/control/reporte-ingresos', { signal, timeout: 8000 })
+  return res.data
+}
+
+/**
+ * Detalle nominal de ingresos al concierto: qué tickets registraron ENTRADA
+ * en el día pedido (o en los 3 días si no se pasa dia), opcionalmente de una
+ * sola categoría. Una fila por ticket.
+ */
+export async function detalleIngresosConcierto(
+  dia?: string,
+  categoria?: string,
+  signal?: AbortSignal,
+): Promise<DetalleIngresoConciertoDto[]> {
+  const res = await http.get<DetalleIngresoConciertoDto[]>('/control/reporte-ingresos/detalle', {
+    params: { ...(dia ? { dia } : {}), ...(categoria ? { categoria } : {}) },
+    signal,
+    timeout: 15000,
+  })
+  return res.data
+}
+/**
+ * Regulariza un ingreso QR: registra una ENTRADA con la fecha del día pedido
+ * (solo administrador). Si el ticket ya tiene ENTRADA ese día, el backend
+ * responde 400 ("ya tenía registro").
+ */
+export async function regularizarIngresoConcierto(
+  codigo: string,
+  dia: DiaFeria,
+): Promise<ResultadoRegularizacionAccesoDto> {
+  const res = await http.post<ResultadoRegularizacionAccesoDto>(
+    '/control/regularizar-ingreso',
+    { codigo, dia },
+  )
   return res.data
 }
 /**

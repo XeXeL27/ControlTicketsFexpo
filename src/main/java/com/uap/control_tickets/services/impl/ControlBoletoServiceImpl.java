@@ -2,8 +2,12 @@ package com.uap.control_tickets.services.impl;
 
 import com.uap.control_tickets.dto.control.BoletoDentroDto;
 import com.uap.control_tickets.dto.control.EventoBoletoDto;
+import com.uap.control_tickets.dto.control.IngresosDiaFeriaDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosFeriaDto;
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ResumenBoletosDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
+import com.uap.control_tickets.enums.DiaFeria;
 import com.uap.control_tickets.enums.EstadoRegistro;
 import com.uap.control_tickets.enums.TipoAcceso;
 import com.uap.control_tickets.enums.TipoBoleto;
@@ -28,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,6 +221,41 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         return r;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ReporteIngresosFeriaDto reporteIngresosPorDia() {
+        // Un elemento por día del evento, en orden DIA_1 → DIA_3. Cada día se
+        // cuenta por FECHA calendario (zona del evento), no por diaFeria del
+        // boleto: lo que importa es cuándo se escaneó la ENTRADA.
+        List<IngresosDiaFeriaDto> dias = new ArrayList<>();
+        long totalFeria = 0;
+        long totalParqueo = 0;
+        for (DiaFeria dia : DiaFeria.values()) {
+            var fecha = calendario.fechaDe(dia);
+            IngresosDiaFeriaDto d = new IngresosDiaFeriaDto();
+            d.setDia(dia.name());
+            d.setFecha(fecha);
+            if (fecha != null) {
+                Instant desde = fecha.atStartOfDay(calendario.zona()).toInstant();
+                Instant hasta = fecha.plusDays(1).atStartOfDay(calendario.zona()).toInstant();
+                d.setIngresosFeria(movimientoBoletoDao.contarPorTipoBoleto(
+                        TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO, TipoBoleto.FERIA, desde, hasta));
+                d.setIngresosParqueo(movimientoBoletoDao.contarPorTipoBoleto(
+                        TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO, TipoBoleto.PARQUEO, desde, hasta));
+            }
+            d.setIngresosTotal(d.getIngresosFeria() + d.getIngresosParqueo());
+            totalFeria += d.getIngresosFeria();
+            totalParqueo += d.getIngresosParqueo();
+            dias.add(d);
+        }
+        ReporteIngresosFeriaDto r = new ReporteIngresosFeriaDto();
+        r.setDias(dias);
+        r.setTotalFeria(totalFeria);
+        r.setTotalParqueo(totalParqueo);
+        r.setTotalGeneral(totalFeria + totalParqueo);
+        return r;
+    }
+
     /** ¿El 'dentro' de este boleto quedo colgado de un dia anterior? */
     private boolean esDentroVencido(Boleto boleto) {
         return movimientoBoletoDao
@@ -285,6 +325,60 @@ public class ControlBoletoServiceImpl implements ControlBoletoService {
         log.info("Registro de salida del boleto {} (datos: {}).",
                 boleto.getCodigo(), r.isSinDatos() ? "no quiso dar" : "sí");
         return toRegistroDto(r);
+    }
+
+    @Override
+    @Transactional
+    public ResultadoRegularizacionAccesoDto regularizarIngreso(
+            String codigo, TipoBoleto tipoBoleto, DiaFeria dia) {
+        String cod = codigo == null ? "" : codigo.trim();
+        if (cod.isEmpty()) {
+            throw new NegocioException("Ingrese el código del boleto");
+        }
+        if (tipoBoleto == null) {
+            throw new NegocioException("Indique el tipo de boleto (FERIA o PARQUEO)");
+        }
+        if (dia == null) {
+            throw new NegocioException("Indique el día del ingreso");
+        }
+        Boleto boleto = boletoDao.findByTipoAndCodigo(tipoBoleto, cod)
+                .filter(b -> b.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException(
+                        "Boleto no encontrado en " + tipoBoleto.etiqueta() + ": " + cod));
+        var fecha = calendario.fechaDe(dia);
+        if (fecha == null) {
+            throw new NegocioException("El " + calendario.describir(dia)
+                    + " no tiene fecha configurada");
+        }
+        Instant desde = fecha.atStartOfDay(calendario.zona()).toInstant();
+        Instant hasta = fecha.plusDays(1).atStartOfDay(calendario.zona()).toInstant();
+        if (movimientoBoletoDao.existsByBoletoIdBoletoAndTipoAndEstadoAndFechaHoraBetween(
+                boleto.getIdBoleto(), TipoAcceso.ENTRADA, EstadoRegistro.ACTIVO, desde, hasta)) {
+            throw new NegocioException("El boleto " + cod + " (" + tipoBoleto.etiqueta()
+                    + ") ya tiene un ingreso registrado " + calendario.describir(dia));
+        }
+
+        Instant cuando = calendario.momentoEnDia(fecha);
+        MovimientoBoleto mov = new MovimientoBoleto();
+        mov.setBoleto(boleto);
+        mov.setTipo(TipoAcceso.ENTRADA);
+        mov.setFechaHora(cuando);
+        movimientoBoletoDao.save(mov);
+
+        // El "dentro" solo se toca si el día regularizado es hoy.
+        if (dia.equals(calendario.diaDeHoy())) {
+            if (boleto.isDentro() && esDentroVencido(boleto)) boleto.setDentro(false);
+            boleto.setDentro(true);
+            boletoDao.save(boleto);
+        }
+
+        log.info("Ingreso regularizado: boleto {} ({}) {}.",
+                cod, tipoBoleto.etiqueta(), calendario.describir(dia));
+        ResultadoRegularizacionAccesoDto r = new ResultadoRegularizacionAccesoDto();
+        r.setIdentificador(cod + " (" + tipoBoleto.etiqueta() + ")");
+        r.setDia(dia.name());
+        r.setFechaHora(cuando);
+        return r;
     }
 
     /** Tope de la foto ya comprimida: ~200 KB en base64 es de sobra para comparar caras. */

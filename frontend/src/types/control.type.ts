@@ -46,6 +46,32 @@ export interface MovimientoAccesoDto {
   fechaHora: string
 }
 
+// --- Regularización de ingresos (corrección del admin, solo ENTRADAS) ---
+
+import type { TipoBoleto } from '@/types/boleto.type'
+import type { TipoTalonario } from '@/types/talonario.type'
+
+/**
+ * Una sola puerta por llamada (los demás campos se ignoran):
+ *  - Concierto QR: codigo + dia.
+ *  - Concierto talonario: numero + tipoEvento + dia.
+ *  - Feria/parqueo: codigo + tipoBoleto + dia.
+ */
+export interface RegularizacionAccesoDto {
+  codigo?: string
+  numero?: number | null
+  tipoBoleto?: TipoBoleto
+  tipoEvento?: TipoTalonario
+  dia: DiaFeria
+}
+
+/** El ingreso que quedó registrado al regularizar. */
+export interface ResultadoRegularizacionAccesoDto {
+  identificador: string
+  dia: string
+  fechaHora: string
+}
+
 // --- Resultado del escaneo (ValidacionTicketDto / PersonaDentroDto) ---
 
 export interface ValidacionTicketDto {
@@ -108,4 +134,46 @@ export interface HistorialPersonaDto {
   total: number
   pagina: number
   paginas: number
+}
+
+// --- Reporte de ingresos al concierto por día (apartado Reportes) ---
+
+import type { DiaFeria } from '@/types/boleto.type'
+
+/** Ingresos (solo ENTRADAS) al concierto de un día, por categoría. */
+export interface IngresosDiaConciertoDto {
+  /** DIA_1 / DIA_2 / DIA_3. */
+  dia: DiaFeria
+  /** Fecha calendario del día (ISO), o null si no está configurada. */
+  fecha?: string | null
+  ingresosEstudiantes: number
+  ingresosAdministrativos: number
+  ingresosDocentes: number
+  /** Tickets EXTERNO. */
+  ingresosParticulares: number
+  ingresosTotal: number
+}
+
+/** Un elemento por día + totales por categoría y general. */
+export interface ReporteIngresosConciertoDto {
+  dias: IngresosDiaConciertoDto[]
+  totalEstudiantes: number
+  totalAdministrativos: number
+  totalDocentes: number
+  totalParticulares: number
+  totalGeneral: number
+}
+
+/** Una fila del detalle nominal: un ticket con sus ENTRADAS del rango pedido. */
+export interface DetalleIngresoConciertoDto {
+  idTicket: number
+  codigoIdentificacion: string
+  categoria: CategoriaTicket
+  nombreCompleto: string
+  ci: string
+  /** RU o código administrativo/docente, si aplica. */
+  codigo?: string | null
+  carrera?: string | null
+  entradas: number
+  ultimaEntrada?: string | null
 }

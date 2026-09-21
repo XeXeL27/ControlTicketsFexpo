@@ -278,6 +278,116 @@ public class TalonarioServiceImpl implements TalonarioService {
         return r;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ReporteVentasTalonarioDto reporteVentas() {
+        // Decenas de talonarios como mucho: se arma en memoria sobre listar().
+        List<TalonarioDetalleDto> talonarios = listar(null, null, false);
+        ReporteVentasTalonarioDto r = new ReporteVentasTalonarioDto();
+        r.setTalonarios(talonarios);
+        r.setTotalTalonarios(talonarios.size());
+        r.setTotalBoletos(talonarios.stream().mapToLong(TalonarioDetalleDto::getCantidad).sum());
+        r.setTotalVendidos(talonarios.stream().mapToLong(TalonarioDetalleDto::getVendidos).sum());
+        r.setTotalDisponibles(talonarios.stream().mapToLong(TalonarioDetalleDto::getDisponibles).sum());
+        r.setTotalAnulados(talonarios.stream().mapToLong(TalonarioDetalleDto::getAnulados).sum());
+        BigDecimal monto = talonarios.stream()
+                .map(TalonarioDetalleDto::getMontoVendido)
+                .filter(java.util.Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        r.setTotalMontoVendido(
+                talonarios.stream().anyMatch(t -> t.getMontoVendido() != null) ? monto : null);
+        r.setPorVendedora(boletoDao.ventasPorVendedora(EstadoRegistro.ACTIVO).stream()
+                .map(v -> {
+                    VentaVendedoraDto d = new VentaVendedoraDto();
+                    d.setVendedora(v.getVendedora());
+                    d.setVendidos(v.getVendidos() == null ? 0 : v.getVendidos());
+                    d.setMonto(v.getMonto());
+                    return d;
+                })
+                .toList());
+        return r;
+    }
+
+    @Override
+    @Transactional
+    public ResultadoRegularizacionDto regularizar(RegularizacionVentaDto dto) {
+        Talonario t = buscar(dto.getIdTalonario());
+        // Responsable opcional: sin responsable solo se corrige la fecha y se
+        // conserva el vendedor que ya figura (o queda sin vendedor).
+        Usuario responsable = null;
+        if (dto.getIdResponsable() != null) {
+            responsable = usuarioDao.findById(dto.getIdResponsable())
+                    .filter(u -> u.getEstado() == EstadoRegistro.ACTIVO)
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Responsable no encontrado"));
+            if (responsable.isBloqueado()) {
+                throw new NegocioException("El responsable '" + responsable.getUsername()
+                        + "' está bloqueado: no puede figurar como vendedor");
+            }
+        }
+        if (dto.getFechaVenta().isAfter(Instant.now())) {
+            throw new NegocioException("La fecha de venta no puede ser futura");
+        }
+
+        // Mismas formas de indicar números que el marcado (hasta N, rango, sueltos).
+        MarcarVentaDto comoMarcado = new MarcarVentaDto();
+        comoMarcado.setIdTalonario(dto.getIdTalonario());
+        comoMarcado.setHastaNumero(dto.getHastaNumero());
+        comoMarcado.setDesde(dto.getDesde());
+        comoMarcado.setHasta(dto.getHasta());
+        comoMarcado.setNumeros(dto.getNumeros());
+        Set<Integer> numeros = numerosAMarcar(comoMarcado, t);
+        if (numeros.isEmpty()) {
+            throw new NegocioException("No se indicó ningún boleto para regularizar");
+        }
+
+        Set<Integer> explicitos = dto.getNumeros() == null
+                ? Set.of()
+                : new LinkedHashSet<>(dto.getNumeros());
+
+        ResultadoRegularizacionDto r = new ResultadoRegularizacionDto();
+        r.setSolicitados(numeros.size());
+        r.setResponsable(responsable == null ? null : responsable.getUsername());
+        r.setFechaVenta(dto.getFechaVenta());
+        List<BoletoTalonario> aGuardar = new ArrayList<>();
+
+        for (Integer n : numeros) {
+            BoletoTalonario b = boletoDao.findByTalonarioIdTalonarioAndNumero(t.getIdTalonario(), n)
+                    .filter(x -> x.getEstado() == EstadoRegistro.ACTIVO)
+                    .orElse(null);
+            if (b == null) {
+                r.aviso("El número " + n + " no pertenece a este talonario");
+                continue;
+            }
+            // Un ANULADO solo revive si se lo nombra explícitamente (igual que el marcado).
+            if (b.getEstadoVenta() == EstadoVenta.ANULADO && !explicitos.contains(n)) {
+                r.aviso("El número " + n + " está anulado y no se tocó "
+                        + "(para revertirlo, indíquelo en los números sueltos)");
+                continue;
+            }
+            // Ya vendido al mismo responsable (o sin cambio de responsable) en la
+            // misma fecha: nada que corregir.
+            if (b.getEstadoVenta() == EstadoVenta.VENDIDO
+                    && mismoResponsable(b.getVendidoPor(), responsable)
+                    && dto.getFechaVenta().equals(b.getFechaVenta())) {
+                r.setSinCambios(r.getSinCambios() + 1);
+                continue;
+            }
+            b.setEstadoVenta(EstadoVenta.VENDIDO);
+            // Sin responsable se conserva el vendedor que ya figura (o queda sin
+            // vendedor si estaba disponible): solo se corrige la fecha.
+            if (responsable != null) b.setVendidoPor(responsable);
+            b.setFechaVenta(dto.getFechaVenta());
+            aGuardar.add(b);
+        }
+        boletoDao.saveAll(aGuardar);
+        r.setCambiados(aGuardar.size());
+        log.info("Regularización en '{}': {} boletos a {} ({}) por {}.",
+                t.getNombre(), r.getCambiados(),
+                responsable == null ? "sin responsable" : responsable.getUsername(),
+                dto.getFechaVenta(), usuarioActual().getUsername());
+        return r;
+    }
+
     // ---------------- helpers ----------------
 
     /** Arma el conjunto de numeros a marcar segun la forma que haya usado la vendedora. */
@@ -369,6 +479,17 @@ public class TalonarioServiceImpl implements TalonarioService {
         if (idUsuario == null) return null;
         return usuarioDao.findById(idUsuario)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario asignado no encontrado"));
+    }
+
+    /**
+     * ¿El boleto ya figura a nombre de ese responsable? Un null contra otro
+     * null también es "el mismo" (regularizar sin responsable no cambia nada
+     * si la fecha ya coincide).
+     */
+    private boolean mismoResponsable(Usuario actual, Usuario responsable) {
+        if (actual == null && responsable == null) return true;
+        if (actual == null || responsable == null) return false;
+        return actual.getIdUsuario().equals(responsable.getIdUsuario());
     }
 
     /**

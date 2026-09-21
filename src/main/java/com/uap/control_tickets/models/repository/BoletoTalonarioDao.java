@@ -63,4 +63,25 @@ public interface BoletoTalonarioDao extends JpaRepository<BoletoTalonario, Long>
             group by b.talonario.tipo
             """)
     List<TotalesTipo> totalesPorTipo(@Param("estado") EstadoRegistro estado);
+
+    /** Ventas agrupadas por responsable, para el reporte de ventas. */
+    interface VentasVendedora {
+        String getVendedora();
+        Long getVendidos();
+        java.math.BigDecimal getMonto();
+    }
+
+    @Query("""
+            select b.vendidoPor.username as vendedora,
+                   count(b) as vendidos,
+                   sum(case when b.talonario.precioUnitario is null then 0
+                            else b.talonario.precioUnitario end) as monto
+            from BoletoTalonario b
+            where b.estado = :estado and b.talonario.estado = :estado
+              and b.estadoVenta = com.uap.control_tickets.enums.EstadoVenta.VENDIDO
+              and b.vendidoPor is not null
+            group by b.vendidoPor.username
+            order by count(b) desc
+            """)
+    List<VentasVendedora> ventasPorVendedora(@Param("estado") EstadoRegistro estado);
 }

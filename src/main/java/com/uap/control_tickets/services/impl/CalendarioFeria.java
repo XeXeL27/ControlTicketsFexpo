@@ -78,6 +78,15 @@ public class CalendarioFeria {
     }
 
     /**
+     * Momento "ahora" pero caído en esa fecha: la regularización de un ingreso
+     * guarda la hora actual del día pedido (zona del evento), para que el
+     * movimiento cuente en ese día y conserve una hora verosímil.
+     */
+    public Instant momentoEnDia(LocalDate fecha) {
+        return fecha.atTime(java.time.LocalTime.now(zona())).atZone(zona()).toInstant();
+    }
+
+    /**
      * ¿Ese instante es de un dia ANTERIOR a hoy?
      *
      * Con esto se detecta el flag 'dentro' que quedo colgado: si la ultima vez que

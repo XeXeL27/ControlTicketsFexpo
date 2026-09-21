@@ -111,4 +111,29 @@ public class TalonarioController {
     public ResponseEntity<ResultadoMarcadoDto> marcar(@Valid @RequestBody MarcarVentaDto dto) {
         return ResponseEntity.ok(talonarioService.marcar(dto));
     }
+
+    @GetMapping("/reporte-ventas")
+    @Operation(summary = "Reporte de todos los talonarios vendidos",
+            description = "Avance por talonario (vendidos, disponibles, anulados, monto), "
+                    + "ventas por vendedora y totales del evento. Base del apartado "
+                    + "\"Reportes\" y de su exportación a PDF.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ReporteVentasTalonarioDto> reporteVentas() {
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(talonarioService.reporteVentas());
+    }
+
+    @PatchMapping("/regularizar")
+    @Operation(summary = "Regularizar boletos vendidos (solo administrador)",
+            description = "Marca boletos como VENDIDOS con una fecha dada y, si se indica, "
+                    + "a nombre de un responsable: para ventas que se hicieron pero no "
+                    + "quedaron bien registradas (otro vendedor, otra fecha). Sin "
+                    + "responsable solo se corrige la fecha y se conserva el vendedor "
+                    + "que ya figura. Quién regulariza queda en la auditoría. Un ANULADO "
+                    + "solo cambia si se lo nombra en los números sueltos.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ResultadoRegularizacionDto> regularizar(
+            @Valid @RequestBody RegularizacionVentaDto dto) {
+        return ResponseEntity.ok(talonarioService.regularizar(dto));
+    }
 }

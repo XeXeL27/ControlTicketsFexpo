@@ -1,7 +1,10 @@
 package com.uap.control_tickets.controllers.control;
 
 import com.uap.control_tickets.dto.control.BoletoDentroDto;
+import com.uap.control_tickets.dto.control.RegularizacionAccesoDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosFeriaDto;
 import com.uap.control_tickets.dto.control.ResumenBoletosDto;
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.RegistroSalidaDetalleDto;
 import com.uap.control_tickets.dto.control.RegistroSalidaDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
@@ -66,6 +69,18 @@ public class ControlBoletoController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(controlBoletoService.resumen());
     }
 
+    @GetMapping("/reporte-ingresos")
+    @Operation(summary = "Ingresos (ENTRADAS) de los 3 días de la feria",
+            description = "Un elemento por día (DIA_1/2/3) con ENTRADAS separadas en "
+                    + "FERIA y PARQUEO, más los totales del evento. Base del apartado "
+                    + "\"Reportes\" y de su exportación a PDF. Solo cuenta ENTRADAS; "
+                    + "salidas e intentos denegados no cuentan.")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
+    public ResponseEntity<ReporteIngresosFeriaDto> reporteIngresos() {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(controlBoletoService.reporteIngresosPorDia());
+    }
+
 
     @GetMapping(value = "/registro-salida/foto", produces = MediaType.IMAGE_JPEG_VALUE)
     @Operation(summary = "Foto del visitante registrada al salir",
@@ -96,5 +111,18 @@ public class ControlBoletoController {
     @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_FERIA')")
     public ResponseEntity<Integer> cerrarJornada() {
         return ResponseEntity.ok(controlBoletoService.cerrarJornada());
+    }
+
+    @PostMapping("/regularizar-ingreso")
+    @Operation(summary = "Regularizar un ingreso de feria/parqueo (solo administrador)",
+            description = "Registra una ENTRADA con la fecha del día pedido: para ingresos "
+                    + "que pasaron por puerta sin escaneo. Si el boleto ya tiene una "
+                    + "ENTRADA ese día, se rechaza con 400 (\"ya tenía registro\"). El "
+                    + "\"dentro\" solo se toca si el día pedido es hoy.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ResultadoRegularizacionAccesoDto> regularizarIngreso(
+            @Valid @RequestBody RegularizacionAccesoDto request) {
+        return ResponseEntity.ok(controlBoletoService.regularizarIngreso(
+                request.getCodigo(), request.getTipoBoleto(), request.getDia()));
     }
 }

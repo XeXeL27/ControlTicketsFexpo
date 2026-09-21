@@ -121,6 +121,27 @@ export interface ResumenBoletosDto {
   dentroDocentes: number
 }
 
+// --- Reporte de ingresos por día (apartado Reportes) ---
+
+/** Ingresos (solo ENTRADAS) de un día de la feria, separado Feria/Parqueo. */
+export interface IngresosDiaFeriaDto {
+  /** DIA_1 / DIA_2 / DIA_3. */
+  dia: DiaFeria
+  /** Fecha calendario del día (ISO), o null si no está configurada. */
+  fecha?: string | null
+  ingresosFeria: number
+  ingresosParqueo: number
+  ingresosTotal: number
+}
+
+/** Un elemento por día + totales del evento. */
+export interface ReporteIngresosFeriaDto {
+  dias: IngresosDiaFeriaDto[]
+  totalFeria: number
+  totalParqueo: number
+  totalGeneral: number
+}
+
 /** Evento en vivo por WebSocket (EventoBoletoDto). */
 export interface EventoBoletoDto {
   tipo: 'ENTRADA' | 'SALIDA' | 'BLOQUEADO' | 'NO_VALIDO'

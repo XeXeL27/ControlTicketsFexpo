@@ -1,8 +1,11 @@
 package com.uap.control_tickets.services.interfaces;
 
 import com.uap.control_tickets.dto.control.BoletoDentroDto;
+import com.uap.control_tickets.dto.control.ReporteIngresosFeriaDto;
 import com.uap.control_tickets.dto.control.ResumenBoletosDto;
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ValidacionBoletoDto;
+import com.uap.control_tickets.enums.DiaFeria;
 import com.uap.control_tickets.enums.TipoAcceso;
 import com.uap.control_tickets.enums.TipoBoleto;
 
@@ -34,6 +37,21 @@ public interface ControlBoletoService {
 
     /** Foto del estado actual, para pintar el monitoreo al abrir la pantalla. */
     ResumenBoletosDto resumen();
+
+    /**
+     * Regulariza UN ingreso de feria/parqueo: registra una ENTRADA con la
+     * fecha del día pedido (solo ADMINISTRADOR). Si el boleto ya tiene una
+     * ENTRADA ese día, se rechaza ("ya tenía registro"). El "dentro" solo se
+     * toca si el día pedido es hoy.
+     */
+    ResultadoRegularizacionAccesoDto regularizarIngreso(
+            String codigo, TipoBoleto tipoBoleto, DiaFeria dia);
+
+    /**
+     * Ingresos (solo ENTRADAS) de los 3 días de la feria, separados en
+     * FERIA y PARQUEO. Base del apartado "Reportes" y de su PDF.
+     */
+    ReporteIngresosFeriaDto reporteIngresosPorDia();
 
     /**
      * Cierra la jornada: deja a TODOS (tickets y boletos) como fuera del recinto.

@@ -1,5 +1,7 @@
 package com.uap.control_tickets.controllers.control;
 
+import com.uap.control_tickets.dto.control.RegularizacionAccesoDto;
+import com.uap.control_tickets.dto.control.ResultadoRegularizacionAccesoDto;
 import com.uap.control_tickets.dto.control.ValidacionTalonarioDto;
 import com.uap.control_tickets.dto.control.ValidacionTalonarioRequestDto;
 import com.uap.control_tickets.services.interfaces.ControlTalonarioService;
@@ -44,5 +46,18 @@ public class ControlTalonarioController {
                 request.getNumero(), request.getTipoEvento(), request.getTipoMovimiento());
         HttpStatus estado = dto.isBloqueado() ? HttpStatus.CONFLICT : HttpStatus.OK;
         return ResponseEntity.status(estado).body(dto);
+    }
+
+    @PostMapping("/regularizar-ingreso")
+    @Operation(summary = "Regularizar un ingreso por número (solo administrador)",
+            description = "Registra una ENTRADA con la fecha del día pedido: para ingresos "
+                    + "que pasaron por puerta sin escaneo. Si el boleto ya tiene una "
+                    + "ENTRADA ese día, se rechaza con 400 (\"ya tenía registro\"). El "
+                    + "\"dentro\" solo se toca si el día pedido es hoy.")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<ResultadoRegularizacionAccesoDto> regularizarIngreso(
+            @Valid @RequestBody RegularizacionAccesoDto request) {
+        return ResponseEntity.ok(controlTalonarioService.regularizarIngreso(
+                request.getNumero(), request.getTipoEvento(), request.getDia()));
     }
 }

@@ -5,10 +5,13 @@ import type {
   BoletoDentroDto,
   RegistroSalidaDetalleDto,
   RegistroSalidaDto,
+  ReporteIngresosFeriaDto,
   ResumenBoletosDto,
   TipoBoleto,
   ValidacionBoletoDto,
 } from '@/types/boleto.type'
+import type { DiaFeria } from '@/types/boleto.type'
+import type { ResultadoRegularizacionAccesoDto } from '@/types/control.type'
 import type { TipoMovimiento } from '@/types/control.type'
 
 /**
@@ -39,6 +42,32 @@ export async function boletosDentro(signal?: AbortSignal): Promise<BoletoDentroD
 /** Foto del estado actual (dentro, total, ingresos y salidas). */
 export async function resumenBoletos(signal?: AbortSignal): Promise<ResumenBoletosDto> {
   const res = await http.get<ResumenBoletosDto>('/control/boletos/resumen', { signal, timeout: 8000 })
+  return res.data
+}
+
+/**
+ * Regulariza un ingreso de feria/parqueo: registra una ENTRADA con la fecha
+ * del día pedido (solo administrador). Si el boleto ya tiene ENTRADA ese día,
+ * el backend responde 400 ("ya tenía registro").
+ */
+export async function regularizarIngresoBoleto(
+  codigo: string,
+  tipoBoleto: TipoBoleto,
+  dia: DiaFeria,
+): Promise<ResultadoRegularizacionAccesoDto> {
+  const res = await http.post<ResultadoRegularizacionAccesoDto>(
+    '/control/boletos/regularizar-ingreso',
+    { codigo, tipoBoleto, dia },
+  )
+  return res.data
+}
+
+/**
+ * Ingresos (solo ENTRADAS) de los 3 días de la feria, separados en
+ * FERIA y PARQUEO. Base del apartado "Reportes".
+ */
+export async function reporteIngresosFeria(signal?: AbortSignal): Promise<ReporteIngresosFeriaDto> {
+  const res = await http.get<ReporteIngresosFeriaDto>('/control/boletos/reporte-ingresos', { signal, timeout: 8000 })
   return res.data
 }
 

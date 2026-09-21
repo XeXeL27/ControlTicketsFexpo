@@ -34,6 +34,7 @@ import ControlTalonarios from '@/views/control/ControlTalonarios.vue'
 // --- Venta de boletos por talonario (feria) ---
 import Talonarios from '@/views/Talonarios.vue'
 import MisTalonarios from '@/views/MisTalonarios.vue'
+import Regularizacion from '@/views/Regularizacion.vue'
 
 // --- Boletos de la feria (entrada al recinto por código, sin QR: carga,
 // validación y monitoreo en vivo — dominio aparte del ticket QR de arriba) ---
@@ -41,6 +42,11 @@ import Boletos from '@/views/Boletos.vue'
 import ControlBoletos from '@/views/control/ControlBoletos.vue'
 import EstadoBoletos from '@/views/control/EstadoBoletos.vue'
 import PulsoFexpo from '@/views/control/PulsoFexpo.vue'
+
+// --- Reportes (ingresos por día, exportables a PDF) ---
+import ReporteFeria from '@/views/reportes/ReporteFeria.vue'
+import ReporteConcierto from '@/views/reportes/ReporteConcierto.vue'
+import ReporteVentas from '@/views/reportes/ReporteVentas.vue'
 
 // Grupos de roles permitidos por ruta (meta.roles). Sin `roles` = cualquier
 // usuario autenticado. Debe coincidir con los @PreAuthorize del backend y con
@@ -83,12 +89,19 @@ const routes: RouteRecordRaw[] = [
   // cada vendedora marca los suyos en /mis-talonarios.
   { path: '/talonarios', component: Talonarios, meta: { roles: ADMIN } },
   { path: '/mis-talonarios', component: MisTalonarios, meta: { roles: VENTA } },
+  { path: '/regularizacion', component: Regularizacion, meta: { roles: ADMIN } },
 
   // Boletos de la feria (CONTROL_FERIA). La carga CSV queda solo ADMINISTRADOR.
   { path: '/boletos', component: Boletos, meta: { roles: ADMIN } },
   { path: '/control-boletos', component: ControlBoletos, meta: { roles: FERIA } },
   { path: '/estado-boletos', component: EstadoBoletos, meta: { roles: FERIA } },
   { path: '/pulso-fexpo', component: PulsoFexpo, meta: { roles: FERIA } },
+
+  // Reportes (ingresos por día, exportables a PDF). Feria para CONTROL_FERIA,
+  // concierto para CONTROL_CONCIERTO, ventas solo ADMINISTRADOR; el admin ve todo.
+  { path: '/reportes/feria', component: ReporteFeria, meta: { roles: FERIA } },
+  { path: '/reportes/concierto', component: ReporteConcierto, meta: { roles: CONCIERTO } },
+  { path: '/reportes/ventas', component: ReporteVentas, meta: { roles: ADMIN } },
 ]
 
 const router = createRouter({
