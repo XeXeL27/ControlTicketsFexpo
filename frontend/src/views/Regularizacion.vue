@@ -8,8 +8,9 @@
 import { ref } from 'vue'
 import RegularizacionVentas from '@/components/RegularizacionVentas.vue'
 import RegularizacionIngresos from '@/components/RegularizacionIngresos.vue'
+import RegularizacionMasiva from '@/components/RegularizacionMasiva.vue'
 
-const pestana = ref<'ventas' | 'ingresos'>('ventas')
+const pestana = ref<'ventas' | 'ingresos' | 'masiva'>('ventas')
 </script>
 
 <template>
@@ -33,10 +34,13 @@ const pestana = ref<'ventas' | 'ingresos'>('ventas')
         :aria-selected="pestana === 'ingresos'"
         @click="pestana = 'ingresos'"
       >Ingresos</button>
+      <button type="button" :class="{ activa: pestana === 'masiva' }" role="tab"
+        :aria-selected="pestana === 'masiva'" @click="pestana = 'masiva'">Ventas masivas</button>
     </div>
 
     <RegularizacionVentas v-if="pestana === 'ventas'" />
-    <RegularizacionIngresos v-else />
+    <RegularizacionIngresos v-else-if="pestana === 'ingresos'" />
+    <RegularizacionMasiva v-show="pestana === 'masiva'" />
   </div>
 </template>
 

@@ -7,7 +7,10 @@ spring.datasource.password=
 spring.jpa.hibernate.ddl-auto=validate
 app.jwt.secret=
 app.jwt.expiration-ms=86400000
-app.cors.allowed-origins=http://localhost:9099
+# Orígenes permitidos (separados por coma). https://localhost es el APK
+# (Capacitor sirve la app desde ahí); sin él, el APK recibe 403 por CORS.
+# En el servidor real, sumar también el dominio web si sirve el front por jar.
+app.cors.allowed-origins=http://localhost:9099,https://localhost
 app.admin.username=
 app.admin.password=
 server.port=9099

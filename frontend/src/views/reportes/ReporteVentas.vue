@@ -21,6 +21,25 @@ const reporte = ref<ReporteVentasTalonarioDto | null>(null)
 const cargando = ref(false)
 const error = ref('')
 const exportando = ref(false)
+const vista = ref<'detalle' | 'eventos'>('detalle')
+const gruposEvento = computed(() => {
+  const grupos = new Map<string, { evento: string; filas: FilaPdfVentas[]; vendidos: number; monto: number; tieneMonto: boolean }>()
+  for (const fila of filasPdfGeneral()) {
+    const grupo = grupos.get(fila.dia) ?? { evento: fila.dia, filas: [], vendidos: 0, monto: 0, tieneMonto: false }
+    grupo.filas.push(fila)
+    grupo.vendidos += fila.vendidos
+    grupo.monto += fila.monto
+    grupo.tieneMonto ||= fila.tieneMonto
+    grupos.set(fila.dia, grupo)
+  }
+  return [...grupos.values()]
+})
+const totalEvento = computed(() => gruposEvento.value.reduce((total, g) => total + g.vendidos, 0))
+const totalRecaudado = computed(() => gruposEvento.value.some((g) => g.tieneMonto)
+  ? gruposEvento.value.reduce((total, g) => total + g.monto, 0) : null)
+function dinero(valor: number | null): string {
+  return valor == null ? 'Sin precio' : `Bs ${valor.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 const filtroDestino = ref<'' | DestinoTalonario>('')
 const filtroTipo = ref<'' | TipoTalonario>('')
@@ -128,7 +147,36 @@ async function exportarPdf(): Promise<void> {
   if (!reporte.value || exportando.value) return
   exportando.value = true
   try {
-    const doc = new jsPDF({ orientation: 'landscape' })
+    const doc = new jsPDF({ orientation: vista.value === 'eventos' ? 'portrait' : 'landscape' })
+    if (vista.value === 'eventos') {
+      let siguienteY = await encabezadoReporte(doc, 'Resumen de ventas',
+        'Cantidades y recaudación por evento y tipo de boleto.')
+      for (const grupo of gruposEvento.value) {
+        autoTable(doc, {
+          startY: siguienteY, ...estilosTablaReporte(), pageBreak: 'avoid',
+          margin: { top: 14, bottom: 20 },
+          head: [[{ content: grupo.evento, colSpan: 3 }], ['Tipo de boleto', 'Cantidad vendida', 'Recaudado']],
+          body: grupo.filas.map((f) => [f.tipoBoleto, f.vendidos, dinero(f.tieneMonto ? f.monto : null)]),
+          foot: [['Subtotal', grupo.vendidos, dinero(grupo.tieneMonto ? grupo.monto : null)]],
+          didDrawPage: (datos) => { siguienteY = (datos.cursor?.y ?? 14) + 8 },
+        })
+      }
+      autoTable(doc, {
+        startY: siguienteY, ...estilosTablaReporte(), pageBreak: 'avoid',
+        margin: { top: 14, bottom: 20 },
+        head: [['Resumen', 'Cantidad vendida', 'Recaudado']],
+        foot: [['TOTAL GENERAL', totalEvento.value, dinero(totalRecaudado.value)]],
+        didDrawPage: (datos) => { siguienteY = (datos.cursor?.y ?? 14) + 6 },
+      })
+      if (siguienteY > doc.internal.pageSize.getHeight() - 26) { doc.addPage(); siguienteY = 16 }
+      doc.setFontSize(9)
+      doc.setTextColor(100, 116, 139)
+      doc.text('Recaudado = vendidos × precio. Los talonarios sin precio no suman al monto.', 14, siguienteY)
+      pieReporte(doc)
+      doc.save('ventas-evento-tipo.pdf')
+      alertas.exito('PDF descargado')
+      return
+    }
     const inicio = await encabezadoReporte(
       doc,
       'Reporte general de ventas',
@@ -202,7 +250,32 @@ onMounted(() => void cargar())
 
     <Alerta v-if="error" tipo="error">{{ error }}</Alerta>
 
-    <div v-if="reporte" class="resumen">
+    <div class="fila" role="tablist" aria-label="Reporte de ventas">
+      <button role="tab" :aria-selected="vista === 'detalle'" :class="{ secundario: vista !== 'detalle' }" @click="vista = 'detalle'">Detalle por talonario</button>
+      <button role="tab" :aria-selected="vista === 'eventos'" :class="{ secundario: vista !== 'eventos' }" @click="vista = 'eventos'">Resumen por evento</button>
+    </div>
+
+    <div v-if="vista === 'eventos'" class="resumen-eventos">
+      <h3>Resumen de ventas por evento</h3>
+      <p v-if="cargando" role="status">Cargando resumen…</p>
+      <p v-else-if="!gruposEvento.length">No hay talonarios registrados.</p>
+      <section v-for="grupo in gruposEvento" :key="grupo.evento" class="card tabla-evento">
+        <table>
+          <caption>{{ grupo.evento }}</caption>
+          <thead><tr><th scope="col">Tipo de boleto</th><th scope="col">Cantidad vendida</th><th scope="col">Recaudado</th></tr></thead>
+          <tbody><tr v-for="f in grupo.filas" :key="f.tipoBoleto">
+            <td>{{ f.tipoBoleto }}</td><td>{{ f.vendidos }}</td><td>{{ dinero(f.tieneMonto ? f.monto : null) }}</td>
+          </tr></tbody>
+          <tfoot><tr><th scope="row">Subtotal</th><td>{{ grupo.vendidos }}</td><td>{{ dinero(grupo.tieneMonto ? grupo.monto : null) }}</td></tr></tfoot>
+        </table>
+      </section>
+      <div v-if="reporte" class="card total-general">
+        <strong>Total general: {{ totalEvento }} boletos vendidos · {{ dinero(totalRecaudado) }} recaudados</strong>
+      </div>
+      <p class="nota">Recaudado = vendidos × precio de cada talonario. Los talonarios sin precio no suman al monto.</p>
+    </div>
+
+    <div v-if="reporte && vista === 'detalle'" class="resumen">
       <div class="dato">
         <span class="numero">{{ reporte.totalVendidos }}</span>
         <span class="etiqueta">boletos vendidos</span>
@@ -225,7 +298,7 @@ onMounted(() => void cargar())
       </div>
     </div>
 
-    <div class="card">
+    <div v-if="vista === 'detalle'" class="card">
       <h3>Por vendedora ({{ filasVendedora.length }})</h3>
       <TablaDatos
         :columnas="columnasVendedora"
@@ -238,7 +311,7 @@ onMounted(() => void cargar())
       />
     </div>
 
-    <div class="card">
+    <div v-if="vista === 'detalle'" class="card">
       <h3>Talonarios ({{ filas.length }})</h3>
       <TablaDatos
         :columnas="columnas"
@@ -286,4 +359,11 @@ onMounted(() => void cargar())
 .numero { font-size: 26px; font-weight: 800; line-height: 1.1; }
 .etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 4px; }
 .nota { color: var(--texto-suave); font-size: 13px; }
+.resumen-eventos { display: flex; flex-direction: column; gap: 16px; }
+.tabla-evento { overflow-x: auto; }
+.tabla-evento table { width: 100%; border-collapse: collapse; }
+.tabla-evento caption { text-align: left; font-size: 18px; font-weight: 700; padding-bottom: 12px; }
+.tabla-evento th, .tabla-evento td { padding: 10px; border-bottom: 1px solid var(--borde); text-align: right; }
+.tabla-evento th:first-child, .tabla-evento td:first-child { text-align: left; }
+.tabla-evento tfoot, .total-general { background: #eff6ff; font-weight: 700; }
 </style>
