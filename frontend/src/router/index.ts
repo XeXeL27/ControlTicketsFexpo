@@ -21,6 +21,8 @@ import Docentes from '@/views/Docentes.vue'
 // Pantallas de impresión y entrega de tickets
 import Impresion from '@/views/Impresion.vue'
 import Entrega from '@/views/Entrega.vue'
+import ActualizacionEntrega from '@/views/ActualizacionEntrega.vue'
+import ActualizacionEntregaEstudiantes from '@/views/ActualizacionEntregaEstudiantes.vue'
 // Huellas con biométricos ZKTeco (sincronización por RU)
 import Huellas from '@/views/Huellas.vue'
 
@@ -48,6 +50,7 @@ import ReporteFeria from '@/views/reportes/ReporteFeria.vue'
 import ReporteConcierto from '@/views/reportes/ReporteConcierto.vue'
 import ReporteEstudiantes from '@/views/reportes/ReporteEstudiantes.vue'
 import ReporteVentas from '@/views/reportes/ReporteVentas.vue'
+import ReporteEntregas from '@/views/reportes/ReporteEntregas.vue'
 
 // Grupos de roles permitidos por ruta (meta.roles). Sin `roles` = cualquier
 // usuario autenticado. Debe coincidir con los @PreAuthorize del backend y con
@@ -77,6 +80,8 @@ const routes: RouteRecordRaw[] = [
   // FASE 2 - Impresión y entrega de tickets + huellas (solo ADMINISTRADOR)
   { path: '/impresion', component: Impresion, meta: { roles: ADMIN } },
   { path: '/entrega', component: Entrega, meta: { roles: ADMIN } },
+  { path: '/actualizacion-entrega', component: ActualizacionEntrega, meta: { roles: ADMIN } },
+  { path: '/actualizacion-estudiantes', component: ActualizacionEntregaEstudiantes, meta: { roles: ADMIN } },
   { path: '/huellas', component: Huellas, meta: { roles: ADMIN } },
 
   // Control de acceso QR (CONTROL_CONCIERTO). Reportes queda solo ADMINISTRADOR.
@@ -104,6 +109,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/reportes/concierto', component: ReporteConcierto, meta: { roles: CONCIERTO } },
   { path: '/reportes/estudiantes', component: ReporteEstudiantes, meta: { roles: CONCIERTO } },
   { path: '/reportes/ventas', component: ReporteVentas, meta: { roles: ADMIN } },
+  { path: '/reportes/entregas', component: ReporteEntregas, meta: { roles: ADMIN } },
 ]
 
 const router = createRouter({

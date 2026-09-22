@@ -19,14 +19,21 @@ import com.uap.control_tickets.models.entity.Ticket;
 import com.uap.control_tickets.models.repository.AdministrativoDao;
 import com.uap.control_tickets.models.repository.DocenteDao;
 import com.uap.control_tickets.models.repository.EstudianteDao;
+import com.uap.control_tickets.models.repository.PersonaDao;
 import com.uap.control_tickets.models.repository.TicketDao;
+import com.uap.control_tickets.Utils.csv.CsvUtils;
+import com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto;
 import com.uap.control_tickets.services.interfaces.TicketService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,7 +58,9 @@ public class TicketServiceImpl implements TicketService {
     private final EstudianteDao estudianteDao;
     private final AdministrativoDao administrativoDao;
     private final DocenteDao docenteDao;
+    private final PersonaDao personaDao;
     private final TicketRenderer ticketRenderer;
+    private final CambioTipoService cambioTipoService;
 
     /**
      * El propio servicio, pero visto a traves del proxy de Spring. Se usa solo en la
@@ -371,6 +380,395 @@ public class TicketServiceImpl implements TicketService {
         t.setEntregado(entregado);
         t.setFechaEntrega(entregado ? Instant.now() : null);
         return toDetalleDto(ticketDao.save(t));
+    }
+
+    // -------------------------------------------------------------------------
+    // Actualización por código administrativo (entrega + posible promoción a docente)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Busca por código administrativo, marca su ticket como entregado y,
+     * si la segunda columna trae texto, lo promueve a docente usando ese texto
+     * como materia/carrera (campo Docente.carrera).
+     * La tercera columna (SI/NO) decide si se marca entregado.
+     *
+     * Flujo:
+     *  1) Busca Administrativo ACTIVO por código; si no existe busca Docente ACTIVO
+     *     con el mismo código (ya fue convertido antes).
+     *  2) Si materia no está vacía -> promueve/actualiza a docente (siempre, aunque SI/NO)
+     *  3) Solo si col3 = SI marca entregado el/los tickets del registro final (misma fila, QR y código conservados).
+     *     Si col3 = NO y hay materia -> solo promueve, NO marca entregado.
+     */
+    @Override
+    @Transactional
+    public TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia, String entregaFlag) {
+        if (codigoAdm == null || codigoAdm.isBlank()) {
+            throw new NegocioException("El código administrativo es obligatorio");
+        }
+        String codigo = codigoAdm.trim();
+        String carrera = materia == null ? "" : materia.trim();
+        boolean marcarEntregado = parseEntregaFlag(entregaFlag);
+
+        // 1) Buscar por código administrativo/docente; si no pilla, buscar por CI (carnet) en Persona
+        var admOpt = administrativoDao.findByCodigoAdministrativo(codigo)
+                .filter(a -> a.getEstado() == EstadoRegistro.ACTIVO);
+        var docOpt = docenteDao.findByCodigoDocente(codigo)
+                .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO);
+
+        boolean yaEsDocente = false;
+        Long idAdm = null;
+        Long idDoc = null;
+        Administrativo admEnt = null;
+        Docente docEnt = null;
+        Long personaId = null;
+        String codigoAdmOriginal = null;
+
+        if (admOpt.isPresent()) {
+            admEnt = admOpt.get();
+            idAdm = admEnt.getIdAdministrativo();
+            personaId = admEnt.getPersona().getIdPersona();
+            codigoAdmOriginal = admEnt.getCodigoAdministrativo();
+        } else if (docOpt.isPresent()) {
+            docEnt = docOpt.get();
+            yaEsDocente = true;
+            idDoc = docEnt.getIdDocente();
+            personaId = docEnt.getPersona().getIdPersona();
+            codigoAdmOriginal = docEnt.getCodigoDocente();
+            if (!carrera.isEmpty() && !carrera.equals(docEnt.getCarrera())) {
+                if (carrera.length() > 255) {
+                    throw new NegocioException("La materia/carrera supera 255 caracteres");
+                }
+                docEnt.setCarrera(carrera);
+                docenteDao.save(docEnt);
+            }
+        } else {
+            // Fallback: col1 como CI (carnet) -> Persona -> Administrativo/Docente por persona
+            var personaOpt = personaDao.findByCi(codigo)
+                    .filter(p -> p.getEstado() == EstadoRegistro.ACTIVO);
+            if (personaOpt.isPresent()) {
+                personaId = personaOpt.get().getIdPersona();
+                var admPorCi = administrativoDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO);
+                if (admPorCi.isPresent()) {
+                    admEnt = admPorCi.get();
+                    idAdm = admEnt.getIdAdministrativo();
+                    codigoAdmOriginal = admEnt.getCodigoAdministrativo();
+                } else {
+                    var docPorCi = docenteDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO);
+                    if (docPorCi.isPresent()) {
+                        docEnt = docPorCi.get();
+                        yaEsDocente = true;
+                        idDoc = docEnt.getIdDocente();
+                        codigoAdmOriginal = docEnt.getCodigoDocente();
+                        if (!carrera.isEmpty() && !carrera.equals(docEnt.getCarrera())) {
+                            if (carrera.length() > 255) {
+                                throw new NegocioException("La materia/carrera supera 255 caracteres");
+                            }
+                            docEnt.setCarrera(carrera);
+                            docenteDao.save(docEnt);
+                        }
+                    }
+                }
+            }
+            if (idAdm == null && idDoc == null) {
+                throw new RecursoNoEncontradoException(
+                        "No se encontró persona con código/CI: " + codigo + " (se buscó como código adm/docente y como carnet CI)");
+            }
+        }
+
+        // 2) Si trae materia y aún es administrativo -> promover a docente (independiente de SI/NO)
+        if (!carrera.isEmpty() && !yaEsDocente) {
+            cambioTipoService.aDocente(idAdm, carrera);
+            // Tras la promoción el ticket ya migró a docente; buscar por personaId (más fiable que por código si se buscó por CI)
+            var docente = (personaId != null
+                    ? docenteDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO).orElse(null)
+                    : null);
+            if (docente == null && codigoAdmOriginal != null) {
+                docente = docenteDao.findByCodigoDocente(codigoAdmOriginal)
+                        .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO).orElse(null);
+            }
+            if (docente == null) {
+                docente = docenteDao.findByCodigoDocente(codigo)
+                        .filter(d -> d.getEstado() == EstadoRegistro.ACTIVO).orElse(null);
+            }
+            if (docente == null) {
+                throw new RecursoNoEncontradoException("Docente no encontrado tras conversión");
+            }
+            idDoc = docente.getIdDocente();
+            docEnt = docente;
+            yaEsDocente = true;
+        }
+
+        // 3) Marcar entregado solo si col3 = SI
+        if (!marcarEntregado) {
+            // NO + sin materia = fila sin acción (no entrega ni promueve) -> informar
+            if (carrera.isEmpty()) {
+                throw new NegocioException("Fila sin acción: col3=NO y sin materia — no se marca entrega ni se promueve");
+            }
+            // Solo promovió: devolver el ticket del docente sin tocar entregado, o dto sintético si no hay ticket
+            List<Ticket> tickets = yaEsDocente
+                    ? ticketDao.findAllByDocenteIdDocente(idDoc)
+                    : ticketDao.findAllByAdministrativoIdAdministrativo(idAdm);
+            var activo = tickets.stream().filter(t -> t.getEstado() == EstadoRegistro.ACTIVO).findFirst().orElse(null);
+            if (activo != null) return toDetalleDto(activo);
+            // Sin ticket pero ya es docente promovido: devolver dto sintético con datos de persona/docente
+            if (docEnt != null) return dtoSinteticoDocente(docEnt);
+            var docente = docenteDao.findByCodigoDocente(codigo).orElse(null);
+            if (docente != null) return dtoSinteticoDocente(docente);
+            // Fallback por personaId si se buscó por CI
+            if (personaId != null) {
+                var docentePorPersona = docenteDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO).orElse(null);
+                if (docentePorPersona != null) return dtoSinteticoDocente(docentePorPersona);
+            }
+            if (!tickets.isEmpty()) return toDetalleDto(tickets.get(0));
+            throw new NegocioException("Promovido a docente sin ticket emitido (ticket pendiente de emitir)");
+        }
+
+        List<Ticket> tickets;
+        if (yaEsDocente) {
+            tickets = ticketDao.findAllByDocenteIdDocente(idDoc);
+        } else {
+            tickets = ticketDao.findAllByAdministrativoIdAdministrativo(idAdm);
+        }
+
+        if (tickets.isEmpty()) {
+            throw new NegocioException(
+                    "La persona con código '" + codigo + "' no tiene ticket emitido; emítalo primero");
+        }
+
+        Instant ahora = Instant.now();
+        for (Ticket t : tickets) {
+            if (t.getEstado() == EstadoRegistro.ACTIVO) {
+                t.setEntregado(true);
+                t.setFechaEntrega(ahora);
+            }
+        }
+        ticketDao.saveAll(tickets);
+
+        return toDetalleDto(tickets.stream()
+                .filter(t -> t.getEstado() == EstadoRegistro.ACTIVO)
+                .findFirst().orElse(tickets.get(0)));
+    }
+
+    /** Compatibilidad 2 params -> SI por defecto. */
+    @Override
+    @Transactional
+    public TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia) {
+        return actualizarPorCodigoAdm(codigoAdm, materia, "SI");
+    }
+
+    private boolean parseEntregaFlag(String flag) {
+        if (flag == null || flag.isBlank()) return true; // compatibilidad: sin col3 = SI
+        String n = flag.trim().toLowerCase().replace("í", "i");
+        n = n.replaceAll("[^a-z0-9]", "");
+        if (n.equals("si") || n.equals("s") || n.equals("yes") || n.equals("y") || n.equals("1") || n.equals("true") || n.equals("entregado") || n.equals("entregar")) return true;
+        if (n.equals("no") || n.equals("n") || n.equals("0") || n.equals("false") || n.equals("pendiente") || n.equals("noentregar")) return false;
+        throw new NegocioException("Columna 3 debe ser SI o NO (recibido: '" + flag + "')");
+    }
+
+    private TicketDetalleDto dtoSinteticoDocente(com.uap.control_tickets.models.entity.Docente docente) {
+        TicketDetalleDto dto = new TicketDetalleDto();
+        dto.setCategoria(CategoriaTicket.DOCENTE.name());
+        dto.setCodigoDocente(docente.getCodigoDocente());
+        dto.setCarrera(docente.getCarrera());
+        var p = docente.getPersona();
+        if (p != null) {
+            dto.setIdPersona(p.getIdPersona());
+            dto.setNombreCompleto(p.getNombreCompleto());
+            dto.setCi(p.getCi());
+        }
+        dto.setEntregado(false);
+        return dto;
+    }
+
+    @Override
+    public ImportacionResultadoDto actualizarPorCodigoAdmCsv(MultipartFile archivo) {
+        if (archivo == null || archivo.isEmpty()) {
+            throw new NegocioException("El archivo CSV está vacío");
+        }
+        ImportacionResultadoDto resultado = new ImportacionResultadoDto();
+        String contenido;
+        try {
+            contenido = CsvUtils.decodificar(archivo.getBytes());
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo leer el CSV: " + e.getMessage());
+        }
+
+        // Cada fila: codigo_adm, materia (col 2 opcional), entrega SI/NO (col3). Se usa el mismo decoder/separador/BOM que importaciones.
+        try (BufferedReader br = new BufferedReader(new StringReader(contenido))) {
+            String linea;
+            int fila = 0;
+            char sep = ',';
+            boolean primera = true;
+            while ((linea = br.readLine()) != null) {
+                if (primera) {
+                    linea = CsvUtils.quitarBom(linea);
+                    sep = CsvUtils.detectarSeparador(linea);
+                    primera = false;
+                    if (esEncabezadoActualizacion(linea, sep)) continue;
+                }
+                if (linea.isBlank()) continue;
+                fila++;
+                resultado.setTotalFilas(resultado.getTotalFilas() + 1);
+                try {
+                    String[] c = CsvUtils.separar(linea, sep);
+                    String codigo = CsvUtils.get(c, 0);
+                    String materia = CsvUtils.get(c, 1); // segunda columna opcional
+                    String entrega = CsvUtils.get(c, 2); // tercera columna SI/NO
+                    if (codigo == null || codigo.isBlank()) {
+                        throw new NegocioException("Falta el código administrativo en columna 1");
+                    }
+                    // Cada fila en su propia transacción para que un fallo no tumbe el lote
+                    self.actualizarPorCodigoAdm(codigo, materia, entrega);
+                    // Conteos: creados = entregados (SI), actualizados = promovidos a docente (con materia)
+                    boolean promovido = materia != null && !materia.isBlank();
+                    boolean entregado = entrega == null || entrega.isBlank() || parseEntregaFlag(entrega);
+                    if (promovido) resultado.setActualizados(resultado.getActualizados() + 1);
+                    if (entregado) resultado.setCreados(resultado.getCreados() + 1);
+                    // Si NO + con materia: solo promovido, sin entregar -> solo actualizados (ya contado)
+                    // Si SI sin materia: solo creados (ya contado)
+                    // Si SI con materia: ambos contadores incrementan
+                } catch (NegocioException ex) {
+                    resultado.agregarError(fila, ex.getMessage());
+                } catch (Exception ex) {
+                    resultado.agregarError(fila, "Error inesperado: " + ex.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo leer el CSV: " + e.getMessage());
+        }
+        return resultado;
+    }
+
+    private boolean esEncabezadoActualizacion(String linea, char sep) {
+        String[] c = CsvUtils.separar(linea, sep);
+        if (c.length == 0) return false;
+        String primera = CsvUtils.normalizar(c[0]);
+        if (primera.contains("codigo") || primera.equals("cod") || primera.equals("codigoadm")
+                || primera.equals("item") || primera.equals("nro") || primera.equals("n")) {
+            return true;
+        }
+        String segunda = c.length > 1 ? CsvUtils.normalizar(c[1]) : "";
+        if (segunda.contains("materia") || segunda.contains("carrera") || segunda.contains("docente")) {
+            return true;
+        }
+        String tercera = c.length > 2 ? CsvUtils.normalizar(c[2]) : "";
+        if (tercera.contains("entrega") || tercera.contains("entregado") || tercera.equals("si") || tercera.equals("no")) {
+            return true;
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Estudiantes: marcar entregado por RU (1 columna)
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public TicketDetalleDto marcarEntregaPorRu(String ru) {
+        return marcarEntregaPorRu(ru, "SI");
+    }
+
+    @Override
+    @Transactional
+    public TicketDetalleDto marcarEntregaPorRu(String ru, String entregaFlag) {
+        if (ru == null || ru.isBlank()) {
+            throw new NegocioException("El RU es obligatorio");
+        }
+        String ruTrim = ru.trim();
+        boolean marcarEntregado = parseEntregaFlag(entregaFlag);
+
+        Estudiante est = estudianteDao.findByRu(ruTrim)
+                .filter(e -> e.getEstado() == EstadoRegistro.ACTIVO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("No se encontró estudiante con RU: " + ruTrim));
+
+        List<Ticket> tickets = ticketDao.findAllByEstudianteIdEstudiante(est.getIdEstudiante());
+        // Filtrar solo ACTIVOS para la respuesta; si no hay ninguno, es que no se emitió ticket
+        var activos = tickets.stream().filter(t -> t.getEstado() == EstadoRegistro.ACTIVO).toList();
+        if (activos.isEmpty()) {
+            throw new NegocioException("El estudiante con RU '" + ruTrim + "' no tiene ticket emitido; emítalo primero");
+        }
+
+        if (!marcarEntregado) {
+            // NO -> no marca entrega, solo devuelve el ticket tal cual (útil si se quiere verificar sin marcar)
+            return toDetalleDto(activos.get(0));
+        }
+
+        Instant ahora = Instant.now();
+        for (Ticket t : activos) {
+            t.setEntregado(true);
+            t.setFechaEntrega(ahora);
+        }
+        ticketDao.saveAll(activos);
+        return toDetalleDto(activos.get(0));
+    }
+
+    @Override
+    public ImportacionResultadoDto marcarEntregaPorRuCsv(MultipartFile archivo) {
+        if (archivo == null || archivo.isEmpty()) {
+            throw new NegocioException("El archivo CSV está vacío");
+        }
+        ImportacionResultadoDto resultado = new ImportacionResultadoDto();
+        String contenido;
+        try {
+            contenido = CsvUtils.decodificar(archivo.getBytes());
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo leer el CSV: " + e.getMessage());
+        }
+
+        try (BufferedReader br = new BufferedReader(new StringReader(contenido))) {
+            String linea;
+            int fila = 0;
+            char sep = ',';
+            boolean primera = true;
+            while ((linea = br.readLine()) != null) {
+                if (primera) {
+                    linea = CsvUtils.quitarBom(linea);
+                    sep = CsvUtils.detectarSeparador(linea);
+                    primera = false;
+                    if (esEncabezadoRu(linea, sep)) continue;
+                }
+                if (linea.isBlank()) continue;
+                fila++;
+                resultado.setTotalFilas(resultado.getTotalFilas() + 1);
+                try {
+                    String[] c = CsvUtils.separar(linea, sep);
+                    String ru = CsvUtils.get(c, 0);
+                    String entrega = CsvUtils.get(c, 1); // opcional SI/NO en col2
+                    if (ru == null || ru.isBlank()) {
+                        throw new NegocioException("Falta el RU en columna 1");
+                    }
+                    // Solo si es SI (o vacío) cuenta como entregado; NO no marca pero no es error
+                    self.marcarEntregaPorRu(ru, entrega);
+                    boolean marcar = entrega == null || entrega.isBlank() || parseEntregaFlag(entrega);
+                    if (marcar) {
+                        resultado.setCreados(resultado.getCreados() + 1);
+                    } else {
+                        // NO sin marcar: lo contamos como actualizado para reflejar que se procesó
+                        resultado.setActualizados(resultado.getActualizados() + 1);
+                    }
+                } catch (NegocioException ex) {
+                    resultado.agregarError(fila, ex.getMessage());
+                } catch (Exception ex) {
+                    resultado.agregarError(fila, "Error inesperado: " + ex.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            throw new NegocioException("No se pudo leer el CSV: " + e.getMessage());
+        }
+        return resultado;
+    }
+
+    private boolean esEncabezadoRu(String linea, char sep) {
+        String[] c = CsvUtils.separar(linea, sep);
+        if (c.length == 0) return false;
+        String primera = CsvUtils.normalizar(c[0]);
+        if (primera.equals("ru") || primera.equals("r.u.") || primera.equals("r u") || primera.contains("registro") || primera.contains("universitario")) {
+            return true;
+        }
+        // Si la primera celda no tiene dígitos, es encabezado (RU siempre tiene dígitos)
+        String ru = CsvUtils.get(c, 0);
+        if (ru != null && ru.chars().noneMatch(Character::isDigit)) return true;
+        return false;
     }
 
     @Override

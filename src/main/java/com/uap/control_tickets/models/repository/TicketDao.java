@@ -17,6 +17,9 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     List<Ticket> findAllByDocenteIdDocente(Long idDocente);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    List<Ticket> findAllByEstudianteIdEstudiante(Long idEstudiante);
+
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")
     @org.springframework.data.jpa.repository.Query("select t from Ticket t order by t.idTicket")
     List<Ticket> ticketsParaReporte();
@@ -74,6 +77,13 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
 
     List<Ticket> findAllByCategoriaAndEstudianteCarreraAndEstadoOrderByIdTicketAsc(
             CategoriaTicket categoria, String carrera, EstadoRegistro estado);
+
+    // --- Entregas ---
+    long countByCategoriaAndEstado(CategoriaTicket categoria, EstadoRegistro estado);
+
+    long countByEntregadoAndEstado(boolean entregado, EstadoRegistro estado);
+
+    long countByCategoriaAndEntregadoAndEstado(CategoriaTicket categoria, boolean entregado, EstadoRegistro estado);
 
     // --- Monitoreo en tiempo real ---
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")

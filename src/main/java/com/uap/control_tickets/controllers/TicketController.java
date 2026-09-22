@@ -141,6 +141,45 @@ public class TicketController {
         return ResponseEntity.ok(ticketService.marcarEntrega(idTicket, entregado));
     }
 
+    @PostMapping("/entrega-por-codigo")
+    @Operation(summary = "Actualiza por código adm: col2=materia, col3=SI/NO entrega",
+            description = "codigoAdm=col1, materia=col2 opcional->Docente.carrera, entrega=col3 SI/NO (SI=marca entregado, NO+con materia=solo promueve a docente)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> entregaPorCodigo(@RequestParam String codigoAdm,
+                                                             @RequestParam(required = false) String materia,
+                                                             @RequestParam(required = false) String entrega) {
+        return ResponseEntity.ok(ticketService.actualizarPorCodigoAdm(codigoAdm, materia, entrega));
+    }
+
+    @PostMapping(value = "/entrega-por-codigo/csv", consumes = "multipart/form-data")
+    @Operation(summary = "Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO) -> entrega y promoción",
+            description = "CSV por posición: col1=codigo administrativo (obligatoria), col2=materia/carrera (opcional), col3=SI/NO (SI=marca entregado, NO+solo promueve si hay materia)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto> entregaPorCodigoCsv(
+            @RequestParam("archivo") org.springframework.web.multipart.MultipartFile archivo) {
+        return ResponseEntity.ok(ticketService.actualizarPorCodigoAdmCsv(archivo));
+    }
+
+    // --- Estudiantes: entrega por RU (1 columna CSV) ---
+
+    @PostMapping("/entrega-por-ru")
+    @Operation(summary = "Marca entregado el ticket del estudiante por RU (1 columna)",
+            description = "ru=RU del estudiante (col 1); entrega=SI/NO opcional (default SI)")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> entregaPorRu(@RequestParam String ru,
+                                                         @RequestParam(required = false) String entrega) {
+        return ResponseEntity.ok(ticketService.marcarEntregaPorRu(ru, entrega));
+    }
+
+    @PostMapping(value = "/entrega-por-ru/csv", consumes = "multipart/form-data")
+    @Operation(summary = "Masivo estudiantes: CSV con 1 columna (RU) -> marca entregado",
+            description = "CSV por posición: col1=RU (obligatoria), col2=SI/NO opcional; marca entregado solo si col2=SI o vacía")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto> entregaPorRuCsv(
+            @RequestParam("archivo") org.springframework.web.multipart.MultipartFile archivo) {
+        return ResponseEntity.ok(ticketService.marcarEntregaPorRuCsv(archivo));
+    }
+
     @GetMapping(value = "/{idTicket}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     @Operation(summary = "Solo el QR del ticket (PNG)",
             description = "Útil para categorías sin plantilla de ticket todavía (ej. administrativo)")

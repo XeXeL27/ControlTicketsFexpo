@@ -119,3 +119,53 @@ export function reiniciarImpresion(categoria: CategoriaTicket = 'ESTUDIANTE') {
     .post<number>('/tickets/impresion/reiniciar', null, { params: { categoria } })
     .then((r) => r.data)
 }
+
+/**
+ * Actualiza por código adm: col2=materia, col3=SI/NO entrega.
+ * SI -> marca entregado (+ promueve si hay materia); NO+con materia -> solo promueve a docente.
+ * Backend: POST /tickets/entrega-por-codigo?codigoAdm=&materia=&entrega=
+ */
+export function actualizarEntregaPorCodigo(codigoAdm: string, materia?: string, entrega?: string) {
+  return http
+    .post<TicketDetalleDto>('/tickets/entrega-por-codigo', null, {
+      params: { codigoAdm, materia: materia || undefined, entrega: entrega || undefined },
+    })
+    .then((r) => r.data)
+}
+
+/**
+ * Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO). Cada fila marca entrega
+ * solo si col3=SI y promueve a docente si col2 trae dato (independiente).
+ * Backend: POST /tickets/entrega-por-codigo/csv  multipart campo "archivo"
+ */
+export function actualizarEntregaPorCodigoCsv(archivo: File) {
+  const fd = new FormData()
+  fd.append('archivo', archivo)
+  return http
+    .post<import('@/types/estudiante.type').ImportacionResultadoDto>(
+      '/tickets/entrega-por-codigo/csv',
+      fd,
+    )
+    .then((r) => r.data)
+}
+
+// --- Estudiantes: marcar entregado por RU (1 columna) ---
+
+export function marcarEntregaPorRu(ru: string, entrega?: string) {
+  return http
+    .post<TicketDetalleDto>('/tickets/entrega-por-ru', null, {
+      params: { ru, entrega: entrega || undefined },
+    })
+    .then((r) => r.data)
+}
+
+export function marcarEntregaPorRuCsv(archivo: File) {
+  const fd = new FormData()
+  fd.append('archivo', archivo)
+  return http
+    .post<import('@/types/estudiante.type').ImportacionResultadoDto>(
+      '/tickets/entrega-por-ru/csv',
+      fd,
+    )
+    .then((r) => r.data)
+}

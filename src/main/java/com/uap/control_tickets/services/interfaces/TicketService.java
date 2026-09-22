@@ -67,6 +67,42 @@ public interface TicketService {
     /** Vuelve a dejar como no impresos todos los tickets de una categoria (reinicia esa tanda). */
     int reiniciarImpresion(CategoriaTicket categoria);
 
+    /**
+     * Busca por código administrativo, marca su ticket como ENTREGADO y,
+     * si la segunda columna trae texto, lo promueve a DOCENTE con ese texto como carrera/materia.
+     * La tercera columna (SI/NO) controla si se marca como entregado.
+     *
+     * Regla: SI -> marca entregado (+ promueve si hay materia); NO + materia -> solo promueve a docente, NO marca entregado.
+     *
+     * @param codigoAdm código administrativo (columna 1 del CSV)
+     * @param materia   texto de la columna 2; si es null/vacío solo marca entrega, si trae dato convierte a docente
+     * @param entregaFlag texto de la columna 3 (SI/NO); null/vacío = SI por compatibilidad; NO = no marca entrega
+     */
+    TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia, String entregaFlag);
+
+    /** Compatibilidad: 2 columnas (siempre marca entregado). */
+    default TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia) {
+        return actualizarPorCodigoAdm(codigoAdm, materia, "SI");
+    }
+
+    /**
+     * Variante masiva: CSV con 3 columnas por fila -> codigo_adm, materia, entrega(SI/NO).
+     * Cada fila hace lo mismo que {@link #actualizarPorCodigoAdm}: promueve si hay materia y marca entrega solo si col3=SI.
+     */
+    com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto actualizarPorCodigoAdmCsv(
+            org.springframework.web.multipart.MultipartFile archivo);
+
+    // --- Estudiantes: marcar entregado por RU (1 columna CSV) ---
+    /** Marca como ENTREGADO el/los tickets del estudiante con ese RU. */
+    TicketDetalleDto marcarEntregaPorRu(String ru);
+
+    /** Marca como ENTREGADO el/los tickets del estudiante con ese RU, con flag SI/NO opcional. */
+    TicketDetalleDto marcarEntregaPorRu(String ru, String entregaFlag);
+
+    /** CSV con 1 columna (RU) -> marca entregado a cada estudiante listado. */
+    com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto marcarEntregaPorRuCsv(
+            org.springframework.web.multipart.MultipartFile archivo);
+
     /** Ticket renderizado (con datos + QR) como PNG. */
     byte[] renderPng(Long idTicket);
 
