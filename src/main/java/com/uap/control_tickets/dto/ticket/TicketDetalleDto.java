@@ -24,6 +24,12 @@ public class TicketDetalleDto {
     /** Cuando se marcó la entrega (null si todavía no se entregó). */
     private java.time.Instant fechaEntrega;
 
+    /** true = la persona no aceptó / rechazó la entrada. */
+    private boolean rechazado;
+
+    /** Cuando se marcó como rechazado (null si no). */
+    private java.time.Instant fechaRechazo;
+
     private Long idPersona;
     private String nombreCompleto;
     private String ci;

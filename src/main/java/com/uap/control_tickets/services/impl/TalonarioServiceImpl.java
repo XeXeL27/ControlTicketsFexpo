@@ -10,8 +10,10 @@ import com.uap.control_tickets.exception.RecursoNoEncontradoException;
 import com.uap.control_tickets.models.entity.BoletoTalonario;
 import com.uap.control_tickets.models.entity.Talonario;
 import com.uap.control_tickets.models.entity.Usuario;
+import com.uap.control_tickets.enums.CategoriaTicket;
 import com.uap.control_tickets.models.repository.BoletoTalonarioDao;
 import com.uap.control_tickets.models.repository.TalonarioDao;
+import com.uap.control_tickets.models.repository.TicketDao;
 import com.uap.control_tickets.models.repository.UsuarioDao;
 import com.uap.control_tickets.services.interfaces.TalonarioService;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +45,7 @@ public class TalonarioServiceImpl implements TalonarioService {
     private final TalonarioDao talonarioDao;
     private final BoletoTalonarioDao boletoDao;
     private final UsuarioDao usuarioDao;
+    private final TicketDao ticketDao;
 
     @Override
     @Transactional(readOnly = true)
@@ -286,15 +289,38 @@ public class TalonarioServiceImpl implements TalonarioService {
         r.setTalonarios(talonarios);
         r.setTotalTalonarios(talonarios.size());
         r.setTotalBoletos(talonarios.stream().mapToLong(TalonarioDetalleDto::getCantidad).sum());
-        r.setTotalVendidos(talonarios.stream().mapToLong(TalonarioDetalleDto::getVendidos).sum());
+        long vendidosTalonarios = talonarios.stream().mapToLong(TalonarioDetalleDto::getVendidos).sum();
         r.setTotalDisponibles(talonarios.stream().mapToLong(TalonarioDetalleDto::getDisponibles).sum());
         r.setTotalAnulados(talonarios.stream().mapToLong(TalonarioDetalleDto::getAnulados).sum());
-        BigDecimal monto = talonarios.stream()
+        BigDecimal montoTalonarios = talonarios.stream()
                 .map(TalonarioDetalleDto::getMontoVendido)
                 .filter(java.util.Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        r.setTotalMontoVendido(
-                talonarios.stream().anyMatch(t -> t.getMontoVendido() != null) ? monto : null);
+        boolean tieneMontoTalonarios = talonarios.stream().anyMatch(t -> t.getMontoVendido() != null);
+
+        // Entradas entregadas de adm/doc como boletos vendidos (precio 125 c/u) — para /reportes/ventas
+        long admEntregados = ticketDao.countByCategoriaAndEntregadoAndEstado(CategoriaTicket.ADMINISTRATIVO, true, EstadoRegistro.ACTIVO);
+        long docEntregados = ticketDao.countByCategoriaAndEntregadoAndEstado(CategoriaTicket.DOCENTE, true, EstadoRegistro.ACTIVO);
+        long totalEntregadosAdmDoc = admEntregados + docEntregados;
+        BigDecimal precioAdmDoc = BigDecimal.valueOf(125);
+        BigDecimal montoEntregadosAdmDoc = totalEntregadosAdmDoc == 0 ? null : precioAdmDoc.multiply(BigDecimal.valueOf(totalEntregadosAdmDoc));
+
+        r.setTotalEntregadosAdm(admEntregados);
+        r.setTotalEntregadosDoc(docEntregados);
+        r.setTotalEntregadosAdmDoc(totalEntregadosAdmDoc);
+        r.setMontoEntregadosAdmDoc(montoEntregadosAdmDoc);
+        r.setPrecioEntregadoAdmDoc(precioAdmDoc);
+
+        // Totales generales con entregados incluidos
+        r.setTotalVendidos(vendidosTalonarios + totalEntregadosAdmDoc);
+        if (tieneMontoTalonarios || montoEntregadosAdmDoc != null) {
+            BigDecimal totalMonto = montoTalonarios;
+            if (montoEntregadosAdmDoc != null) totalMonto = totalMonto.add(montoEntregadosAdmDoc);
+            r.setTotalMontoVendido(totalMonto);
+        } else {
+            r.setTotalMontoVendido(null);
+        }
+
         r.setPorVendedora(boletoDao.ventasPorVendedora(EstadoRegistro.ACTIVO).stream()
                 .map(v -> {
                     VentaVendedoraDto d = new VentaVendedoraDto();

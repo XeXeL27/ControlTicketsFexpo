@@ -15,6 +15,7 @@ const alertas = useAlertas()
 
 // --- De a uno ---
 const ruUno = ref('')
+const entregaUno = ref<'SI' | 'NO' | 'RECHAZADO'>('SI')
 const procesandoUno = ref(false)
 
 async function actualizarUno() {
@@ -25,10 +26,13 @@ async function actualizarUno() {
   }
   procesandoUno.value = true
   try {
-    const t = await marcarEntregaPorRu(ru)
-    alertas.exito(`RU ${ru} — ticket ${t.codigoIdentificacion} marcado como entregado`)
+    const t = await marcarEntregaPorRu(ru, entregaUno.value)
+    let msg = 'marcado como entregado'
+    if (entregaUno.value === 'RECHAZADO') msg = 'marcado como NO ACEPTO / rechazado'
+    else if (entregaUno.value === 'NO') msg = 'sin marcar (pendiente)'
+    alertas.exito(`RU ${ru} — ticket ${t.codigoIdentificacion} ${msg}`)
   } catch (e) {
-    alertas.error(mensajeError(e, 'No se pudo marcar entregado'))
+    alertas.error(mensajeError(e, 'No se pudo actualizar'))
   } finally {
     procesandoUno.value = false
   }
@@ -39,9 +43,25 @@ const archivo = ref<File | null>(null)
 const importando = ref(false)
 const resultado = ref<ImportacionResultadoDto | null>(null)
 
-type FilaPrevia = { fila: number; ru: string }
+type FilaPrevia = { fila: number; ru: string; entrega: string; accion: string }
 const previa = ref<FilaPrevia[]>([])
 const totalFilasPrevia = ref(0)
+
+function esRechazado(valor: string): boolean {
+  const n = normalizar(valor).replace(/[^a-z0-9]/g, '')
+  return n === 'rechazado' || n === 'rechazada' || n === 'rechazo' || n === 'noacepto' || n === 'noacepta'
+}
+function esEntregaSi(valor: string): boolean {
+  const n = normalizar(valor)
+  return n === 'si' || n === 's' || n === 'yes' || n === '1' || n === 'true' || n === 'entregado' || n === ''
+}
+function accionEstRu(ru: string, entrega: string): string {
+  if (!ru.trim()) return 'FALTA RU'
+  const e = entrega.trim()
+  if (!e || esEntregaSi(e)) return 'Entregar'
+  if (esRechazado(e)) return 'Rechazado'
+  return 'Pendiente (NO)'
+}
 
 function detectarSeparador(linea: string): string {
   const comas = (linea.match(/,/g) || []).length
@@ -107,8 +127,10 @@ async function alElegir(f: File) {
     fila++
     const c = separar(linea, sep)
     const ru = (c[0] || '').trim()
+    const entrega = (c[1] || '').trim().toUpperCase() || 'SI'
+    const accion = accionEstRu(ru, entrega)
     if (previa.value.length < LIMITE) {
-      previa.value.push({ fila, ru: ru || '—' })
+      previa.value.push({ fila, ru: ru || '—', entrega, accion })
     }
   }
   totalFilasPrevia.value = fila
@@ -127,8 +149,9 @@ async function importar() {
   try {
     resultado.value = await marcarEntregaPorRuCsv(archivo.value)
     const r = resultado.value
+    const rech = (r as any).rechazados ?? 0
     if (!r.errores.length) {
-      alertas.exito(`Listo: ${r.creados} entregado(s)`)
+      alertas.exito(`Listo: ${r.creados} entregado(s), ${rech} rechazado(s)`)
     } else {
       alertas.info(`Procesadas ${r.totalFilas} · ${r.errores.length} con error`)
     }
@@ -149,7 +172,7 @@ const columnas = computed(() => previa.value.length)
   <div>
     <h2 style="margin:0 0 8px">Actualización estudiantes por RU</h2>
     <p class="ayuda" style="margin:0 0 16px">
-      Una sola columna: <code>RU</code> — busca al estudiante por <code>RU</code> y marca su ticket como <code>entregado</code>. Nada más.
+      Col 1 = <code>RU</code> — busca al estudiante por <code>RU</code> y marca su ticket como <code>entregado</code> o <code style="color:#dc2626">rechazado / no acepto</code>. Col 2 opcional <code>SI / NO / RECHAZADO</code>.
     </p>
 
     <!-- De a uno -->
@@ -160,8 +183,16 @@ const columnas = computed(() => previa.value.length)
           RU *
           <input v-model="ruUno" placeholder="Ej. 2023-00123" :disabled="procesandoUno" />
         </label>
+        <label style="min-width:160px">
+          Entrega *
+          <select v-model="entregaUno" :disabled="procesandoUno">
+            <option value="SI">SI — entregado</option>
+            <option value="NO">NO — pendiente</option>
+            <option value="RECHAZADO">RECHAZADO — no acepto</option>
+          </select>
+        </label>
         <button :disabled="procesandoUno || !ruUno.trim()" @click="actualizarUno">
-          {{ procesandoUno ? 'Guardando…' : 'Marcar entregado' }}
+          {{ procesandoUno ? 'Guardando…' : 'Actualizar' }}
         </button>
       </div>
     </div>
@@ -170,14 +201,14 @@ const columnas = computed(() => previa.value.length)
     <div class="card" style="margin-bottom:16px">
       <strong>Carga masiva por CSV</strong>
       <p class="ayuda">
-        Archivo <code>.csv</code> con 1 columna: <code>RU</code> (separador <code>,</code> o <code>;</code>).
-        Encabezado con <code>RU / R.U.</code> se saltea solo. Solo marca <code>entregado</code>.
+        Archivo <code>.csv</code> con 1–2 columnas: <code>RU , SI/NO/RECHAZADO</code> (separador <code>,</code> o <code>;</code>).
+        Encabezado con <code>RU / R.U.</code> se saltea solo. Col 2 vacía o <code>SI</code> = entregado, <code>RECHAZADO / NO ACEPTO</code> = marca rechazado en rojo.
       </p>
 
       <CsvDropzone
         v-model="archivo"
         :deshabilitado="importando"
-        ayuda="CSV con 1 columna: RU"
+        ayuda="CSV con 1–2 columnas: RU , SI/NO/RECHAZADO"
         @elegido="alElegir"
         @quitado="quitarArchivo"
       >
@@ -195,8 +226,12 @@ const columnas = computed(() => previa.value.length)
             <span class="etiqueta">filas de datos</span>
           </div>
           <div class="dato">
-            <span class="numero" style="color:var(--verde)">{{ totalFilasPrevia }}</span>
-            <span class="etiqueta">se marcarán entregados</span>
+            <span class="numero" style="color:var(--verde)">{{ previa.filter((f)=>f.entrega==='SI').length }}</span>
+            <span class="etiqueta">a entregar</span>
+          </div>
+          <div class="dato" style="border-color:#fecaca;background:#fef2f2">
+            <span class="numero" style="color:#dc2626">{{ previa.filter((f)=>f.entrega==='RECHAZADO' || esRechazado(f.entrega)).length }}</span>
+            <span class="etiqueta">rechazados</span>
           </div>
         </div>
 
@@ -208,12 +243,24 @@ const columnas = computed(() => previa.value.length)
               <tr>
                 <th style="width:60px">#</th>
                 <th>RU</th>
+                <th style="width:110px">Entrega</th>
+                <th style="width:140px">Acción</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="f in previa" :key="f.fila">
                 <td style="color:var(--texto-suave)">{{ f.fila }}</td>
                 <td>{{ f.ru }}</td>
+                <td>
+                  <span v-if="f.entrega==='SI'" class="chip" style="background:#dcfce7;color:#166534">SI</span>
+                  <span v-else-if="esRechazado(f.entrega)" class="chip" style="background:#991b1b;color:#fff">NO ACEPTO</span>
+                  <span v-else class="chip" style="background:#f1f5f9;color:#64748b">{{ f.entrega }}</span>
+                </td>
+                <td>
+                  <span v-if="f.accion==='Rechazado'" class="chip" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca">No acepto</span>
+                  <span v-else-if="f.accion==='Entregar'" class="chip" style="background:#dcfce7;color:#166534">Entregar</span>
+                  <span v-else class="chip" style="background:#f1f5f9;color:#64748b">{{ f.accion }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -224,7 +271,7 @@ const columnas = computed(() => previa.value.length)
       </div>
 
       <Alerta v-if="resultado" :tipo="resultado.errores.length ? 'info' : 'exito'" cerrable @cerrar="resultado = null" style="margin-top:16px">
-        Procesadas {{ resultado.totalFilas }} · entregados {{ resultado.creados }}
+        Procesadas {{ resultado.totalFilas }} · entregados {{ resultado.creados }} · rechazados {{ (resultado as any).rechazados ?? 0 }}
         <span v-if="resultado.errores.length">· {{ resultado.errores.length }} con error</span>
         <ul v-if="resultado.errores.length" style="margin:6px 0 0;padding-left:18px">
           <li v-for="er in resultado.errores" :key="er.fila">Fila {{ er.fila }}: {{ er.motivo }}</li>
@@ -233,7 +280,7 @@ const columnas = computed(() => previa.value.length)
     </div>
 
     <p class="ayuda">
-      Endpoints: <code>POST /api/tickets/entrega-por-ru?ru=</code> y
+      Endpoints: <code>POST /api/tickets/entrega-por-ru?ru=&amp;entrega=SI|NO|RECHAZADO</code> y
       <code>POST /api/tickets/entrega-por-ru/csv</code> (campo <code>archivo</code>).
     </p>
   </div>

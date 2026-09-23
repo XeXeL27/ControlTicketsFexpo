@@ -4,6 +4,7 @@ export interface CategoriaEntrega {
   etiqueta: string
   total: number
   entregados: number
+  rechazados: number
   pendientes: number
   porcentaje: number
 }

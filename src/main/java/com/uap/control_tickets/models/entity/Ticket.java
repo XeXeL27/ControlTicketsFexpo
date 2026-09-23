@@ -71,6 +71,18 @@ public class Ticket extends AuditoriaConfig {
     @Column(name = "fecha_entrega")
     private java.time.Instant fechaEntrega;
 
+    /**
+     * true = la persona rechazó / no aceptó recibir la entrada.
+     * Excluyente con entregado: no puede estar entregado y rechazado a la vez.
+     * Sirve para el reporte de rechazados y para la nómina en rojo.
+     */
+    @Column(name = "rechazado", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean rechazado = false;
+
+    /** Cuando se marcó como rechazado (null si no). */
+    @Column(name = "fecha_rechazo")
+    private java.time.Instant fechaRechazo;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_persona", nullable = false)
     private Persona persona;

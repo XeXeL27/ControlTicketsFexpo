@@ -32,6 +32,8 @@ export interface ImportacionResultadoDto {
   creados: number
   /** Filas cuyo RU ya existia y se actualizaron con los datos del archivo. */
   actualizados: number
+  /** Filas marcadas como rechazado / no acepto */
+  rechazados?: number
   errores: { fila: number; motivo: string }[]
 }
 

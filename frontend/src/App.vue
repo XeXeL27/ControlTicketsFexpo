@@ -45,7 +45,7 @@ function alternarSeccion(id: string) {
 /** Qué sección contiene la ruta actual, para abrirla sola al entrar. */
 function seccionDeRuta(path: string): string {
   if (['/personas', '/usuarios', '/roles', '/'].includes(path)) return 'administracion'
-  if (['/estudiantes', '/administrativos', '/docentes', '/impresion', '/entrega', '/actualizacion-entrega', '/actualizacion-estudiantes', '/huellas'].includes(path)) return 'tickets'
+  if (['/estudiantes', '/administrativos', '/docentes', '/impresion', '/entrega', '/actualizacion-entrega', '/actualizacion-estudiantes', '/verificacion-codigos', '/huellas'].includes(path)) return 'tickets'
   if (['/control', '/control-talonarios', '/personas-dentro', '/reportes/personas'].includes(path)) return 'concierto'
   if (['/talonarios', '/mis-talonarios', '/regularizacion'].includes(path)) return 'venta'
   if (path.startsWith('/reportes/')) return 'reportes'
@@ -189,6 +189,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link to="/entrega">Entrega</router-link>
             <router-link to="/actualizacion-entrega">Actualización por código</router-link>
             <router-link to="/actualizacion-estudiantes">Entrega estudiantes (RU)</router-link>
+            <router-link to="/verificacion-codigos">Verificación códigos</router-link>
             <router-link to="/huellas">Huellas</router-link>
           </div>
           </div>
@@ -250,6 +251,7 @@ onUnmounted(() => mediaMovil?.removeEventListener('change', actualizarPantalla))
             <router-link v-if="verConcierto" to="/reportes/estudiantes">Estudiantes por carrera</router-link>
             <router-link v-if="esAdmin" to="/reportes/ventas">Ventas por talonario</router-link>
             <router-link v-if="esAdmin" to="/reportes/entregas">Entregas de tickets</router-link>
+            <router-link v-if="esAdmin" to="/reportes/nomina">Nómina (adm/doc)</router-link>
           </div>
           </div>
         </nav>

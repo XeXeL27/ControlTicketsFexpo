@@ -377,9 +377,58 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public TicketDetalleDto marcarEntrega(Long idTicket, boolean entregado) {
         Ticket t = buscarActivo(idTicket);
-        t.setEntregado(entregado);
-        t.setFechaEntrega(entregado ? Instant.now() : null);
+        if (entregado) {
+            t.setEntregado(true);
+            t.setFechaEntrega(Instant.now());
+            t.setRechazado(false);
+            t.setFechaRechazo(null);
+        } else {
+            t.setEntregado(false);
+            t.setFechaEntrega(null);
+            // No toca rechazado: queda como está si se está desmarcando entrega a pendiente
+            // Si estaba rechazado, se mantiene rechazado (son excluyentes solo al marcar true)
+        }
         return toDetalleDto(ticketDao.save(t));
+    }
+
+    @Override
+    @Transactional
+    public TicketDetalleDto marcarRechazado(Long idTicket, boolean rechazado) {
+        Ticket t = buscarActivo(idTicket);
+        if (rechazado) {
+            t.setRechazado(true);
+            t.setFechaRechazo(Instant.now());
+            t.setEntregado(false);
+            t.setFechaEntrega(null);
+        } else {
+            t.setRechazado(false);
+            t.setFechaRechazo(null);
+        }
+        return toDetalleDto(ticketDao.save(t));
+    }
+
+    @Override
+    @Transactional
+    public TicketDetalleDto actualizarEstadoEntrega(Long idTicket, String estado) {
+        if (estado == null || estado.isBlank()) {
+            throw new NegocioException("Estado de entrega requerido: ENTREGADO, RECHAZADO o PENDIENTE");
+        }
+        String n = estado.trim().toUpperCase();
+        if (n.equals("ENTREGADO") || n.equals("SI")) {
+            return marcarEntrega(idTicket, true);
+        }
+        if (n.equals("RECHAZADO") || n.equals("NO ACEPTO") || n.equals("NO_ACEPTO") || n.equals("RECHAZO")) {
+            return marcarRechazado(idTicket, true);
+        }
+        if (n.equals("PENDIENTE") || n.equals("NO") || n.equals("PEND")) {
+            Ticket t = buscarActivo(idTicket);
+            t.setEntregado(false);
+            t.setFechaEntrega(null);
+            t.setRechazado(false);
+            t.setFechaRechazo(null);
+            return toDetalleDto(ticketDao.save(t));
+        }
+        throw new NegocioException("Estado no reconocido: " + estado + " (use ENTREGADO, RECHAZADO o PENDIENTE)");
     }
 
     // -------------------------------------------------------------------------
@@ -399,6 +448,23 @@ public class TicketServiceImpl implements TicketService {
      *  3) Solo si col3 = SI marca entregado el/los tickets del registro final (misma fila, QR y código conservados).
      *     Si col3 = NO y hay materia -> solo promueve, NO marca entregado.
      */
+    private enum EstadoEntregaCsv { ENTREGADO, PENDIENTE, RECHAZADO }
+
+    private EstadoEntregaCsv parseEstadoEntrega(String flag) {
+        if (flag == null || flag.isBlank()) return EstadoEntregaCsv.ENTREGADO; // compatibilidad: sin col3 = SI
+        String n = flag.trim().toLowerCase().replace("í", "i").replaceAll("[^a-z0-9]", "");
+        if (n.equals("si") || n.equals("s") || n.equals("yes") || n.equals("y") || n.equals("1") || n.equals("true") || n.equals("entregado") || n.equals("entregar") || n.equals("entregada")) return EstadoEntregaCsv.ENTREGADO;
+        if (n.equals("no") || n.equals("n") || n.equals("0") || n.equals("false") || n.equals("pendiente") || n.equals("noentregar") || n.equals("pend") || n.equals("noentregado")) return EstadoEntregaCsv.PENDIENTE;
+        if (n.equals("rechazado") || n.equals("rechazada") || n.equals("rechazados") || n.equals("rechazo") || n.equals("noacepto") || n.equals("noacepta") || n.equals("rechazado") || n.equals("noquiero") || n.equals("rechaza")) return EstadoEntregaCsv.RECHAZADO;
+        throw new NegocioException("Columna 3 debe ser SI, NO o RECHAZADO/NO ACEPTO (recibido: '" + flag + "')");
+    }
+
+    // Mantiene compatibilidad con el antiguo booleano
+    private boolean parseEntregaFlag(String flag) {
+        EstadoEntregaCsv e = parseEstadoEntrega(flag);
+        return e == EstadoEntregaCsv.ENTREGADO;
+    }
+
     @Override
     @Transactional
     public TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia, String entregaFlag) {
@@ -407,7 +473,7 @@ public class TicketServiceImpl implements TicketService {
         }
         String codigo = codigoAdm.trim();
         String carrera = materia == null ? "" : materia.trim();
-        boolean marcarEntregado = parseEntregaFlag(entregaFlag);
+        EstadoEntregaCsv estado = parseEstadoEntrega(entregaFlag);
 
         // 1) Buscar por código administrativo/docente; si no pilla, buscar por CI (carnet) en Persona
         var admOpt = administrativoDao.findByCodigoAdministrativo(codigo)
@@ -498,31 +564,70 @@ public class TicketServiceImpl implements TicketService {
             yaEsDocente = true;
         }
 
-        // 3) Marcar entregado solo si col3 = SI
-        if (!marcarEntregado) {
-            // NO + sin materia = fila sin acción (no entrega ni promueve) -> informar
-            if (carrera.isEmpty()) {
-                throw new NegocioException("Fila sin acción: col3=NO y sin materia — no se marca entrega ni se promueve");
-            }
-            // Solo promovió: devolver el ticket del docente sin tocar entregado, o dto sintético si no hay ticket
+        // 3) Estado final: ENTREGADO / RECHAZADO / PENDIENTE (NO)
+        if (estado == EstadoEntregaCsv.PENDIENTE) {
+            // NO -> si ya está NO (pendiente: entregado=false y rechazado=false) no hace nada; si tiene SI (entregado) o RECHAZADO, actualiza a NO (pendiente). Solo afecta a los que pasas.
             List<Ticket> tickets = yaEsDocente
                     ? ticketDao.findAllByDocenteIdDocente(idDoc)
                     : ticketDao.findAllByAdministrativoIdAdministrativo(idAdm);
-            var activo = tickets.stream().filter(t -> t.getEstado() == EstadoRegistro.ACTIVO).findFirst().orElse(null);
-            if (activo != null) return toDetalleDto(activo);
-            // Sin ticket pero ya es docente promovido: devolver dto sintético con datos de persona/docente
-            if (docEnt != null) return dtoSinteticoDocente(docEnt);
-            var docente = docenteDao.findByCodigoDocente(codigo).orElse(null);
-            if (docente != null) return dtoSinteticoDocente(docente);
-            // Fallback por personaId si se buscó por CI
-            if (personaId != null) {
-                var docentePorPersona = docenteDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO).orElse(null);
-                if (docentePorPersona != null) return dtoSinteticoDocente(docentePorPersona);
+            if (tickets.isEmpty()) {
+                if (docEnt != null) return dtoSinteticoDocente(docEnt);
+                var docente = docenteDao.findByCodigoDocente(codigo).orElse(null);
+                if (docente != null) return dtoSinteticoDocente(docente);
+                if (personaId != null) {
+                    var docentePorPersona = docenteDao.findByPersonaIdPersonaAndEstado(personaId, EstadoRegistro.ACTIVO).orElse(null);
+                    if (docentePorPersona != null) return dtoSinteticoDocente(docentePorPersona);
+                }
+                if (!tickets.isEmpty()) return toDetalleDto(tickets.get(0));
+                throw new NegocioException("La persona con código '" + codigo + "' no tiene ticket emitido; no se puede poner en pendiente");
             }
-            if (!tickets.isEmpty()) return toDetalleDto(tickets.get(0));
-            throw new NegocioException("Promovido a docente sin ticket emitido (ticket pendiente de emitir)");
+            var activosPend = tickets.stream().filter(t -> t.getEstado() == EstadoRegistro.ACTIVO).toList();
+            if (!activosPend.isEmpty() && activosPend.stream().allMatch(t -> !t.isEntregado() && !t.isRechazado())) {
+                // Ya está NO en el sistema — no hacer nada
+                return toDetalleDto(activosPend.get(0));
+            }
+            for (Ticket t : tickets) {
+                if (t.getEstado() == EstadoRegistro.ACTIVO) {
+                    // Solo actualiza si no está ya en NO; si ya tiene SI o RECHAZADO lo pasa a NO
+                    if (t.isEntregado() || t.isRechazado()) {
+                        t.setEntregado(false);
+                        t.setFechaEntrega(null);
+                        t.setRechazado(false);
+                        t.setFechaRechazo(null);
+                    }
+                }
+            }
+            ticketDao.saveAll(tickets);
+            return toDetalleDto(tickets.stream()
+                    .filter(t -> t.getEstado() == EstadoRegistro.ACTIVO)
+                    .findFirst().orElse(tickets.get(0)));
         }
 
+        if (estado == EstadoEntregaCsv.RECHAZADO) {
+            // Marca como RECHAZADO / NO ACEPTO (excluyente con entregado), con o sin promoción previa
+            List<Ticket> tickets = yaEsDocente
+                    ? ticketDao.findAllByDocenteIdDocente(idDoc)
+                    : ticketDao.findAllByAdministrativoIdAdministrativo(idAdm);
+            if (tickets.isEmpty()) {
+                throw new NegocioException(
+                        "La persona con código '" + codigo + "' no tiene ticket emitido; no se puede marcar rechazado");
+            }
+            Instant ahora = Instant.now();
+            for (Ticket t : tickets) {
+                if (t.getEstado() == EstadoRegistro.ACTIVO) {
+                    t.setRechazado(true);
+                    t.setFechaRechazo(ahora);
+                    t.setEntregado(false);
+                    t.setFechaEntrega(null);
+                }
+            }
+            ticketDao.saveAll(tickets);
+            return toDetalleDto(tickets.stream()
+                    .filter(t -> t.getEstado() == EstadoRegistro.ACTIVO)
+                    .findFirst().orElse(tickets.get(0)));
+        }
+
+        // ENTREGADO
         List<Ticket> tickets;
         if (yaEsDocente) {
             tickets = ticketDao.findAllByDocenteIdDocente(idDoc);
@@ -540,6 +645,8 @@ public class TicketServiceImpl implements TicketService {
             if (t.getEstado() == EstadoRegistro.ACTIVO) {
                 t.setEntregado(true);
                 t.setFechaEntrega(ahora);
+                t.setRechazado(false);
+                t.setFechaRechazo(null);
             }
         }
         ticketDao.saveAll(tickets);
@@ -554,15 +661,6 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia) {
         return actualizarPorCodigoAdm(codigoAdm, materia, "SI");
-    }
-
-    private boolean parseEntregaFlag(String flag) {
-        if (flag == null || flag.isBlank()) return true; // compatibilidad: sin col3 = SI
-        String n = flag.trim().toLowerCase().replace("í", "i");
-        n = n.replaceAll("[^a-z0-9]", "");
-        if (n.equals("si") || n.equals("s") || n.equals("yes") || n.equals("y") || n.equals("1") || n.equals("true") || n.equals("entregado") || n.equals("entregar")) return true;
-        if (n.equals("no") || n.equals("n") || n.equals("0") || n.equals("false") || n.equals("pendiente") || n.equals("noentregar")) return false;
-        throw new NegocioException("Columna 3 debe ser SI o NO (recibido: '" + flag + "')");
     }
 
     private TicketDetalleDto dtoSinteticoDocente(com.uap.control_tickets.models.entity.Docente docente) {
@@ -619,14 +717,14 @@ public class TicketServiceImpl implements TicketService {
                     }
                     // Cada fila en su propia transacción para que un fallo no tumbe el lote
                     self.actualizarPorCodigoAdm(codigo, materia, entrega);
-                    // Conteos: creados = entregados (SI), actualizados = promovidos a docente (con materia)
+                    // Conteos: creados = entregados (SI), actualizados = promovidos a docente (con materia), rechazados = rechazado/NO ACEPTO
                     boolean promovido = materia != null && !materia.isBlank();
-                    boolean entregado = entrega == null || entrega.isBlank() || parseEntregaFlag(entrega);
+                    EstadoEntregaCsv est = parseEstadoEntrega(entrega);
                     if (promovido) resultado.setActualizados(resultado.getActualizados() + 1);
-                    if (entregado) resultado.setCreados(resultado.getCreados() + 1);
-                    // Si NO + con materia: solo promovido, sin entregar -> solo actualizados (ya contado)
-                    // Si SI sin materia: solo creados (ya contado)
-                    // Si SI con materia: ambos contadores incrementan
+                    if (est == EstadoEntregaCsv.ENTREGADO) resultado.setCreados(resultado.getCreados() + 1);
+                    else if (est == EstadoEntregaCsv.RECHAZADO) resultado.setRechazados(resultado.getRechazados() + 1);
+                    // Si NO + con materia: solo promovido -> solo actualizados
+                    // Si SI sin materia: solo creados; Si SI con materia: ambos; Si RECHAZADO: solo rechazados (+ actualizados si promovido)
                 } catch (NegocioException ex) {
                     resultado.agregarError(fila, ex.getMessage());
                 } catch (Exception ex) {
@@ -652,7 +750,7 @@ public class TicketServiceImpl implements TicketService {
             return true;
         }
         String tercera = c.length > 2 ? CsvUtils.normalizar(c[2]) : "";
-        if (tercera.contains("entrega") || tercera.contains("entregado") || tercera.equals("si") || tercera.equals("no")) {
+        if (tercera.contains("entrega") || tercera.contains("entregado") || tercera.contains("rechaz") || tercera.contains("acepto") || tercera.equals("si") || tercera.equals("no")) {
             return true;
         }
         return false;
@@ -675,21 +773,44 @@ public class TicketServiceImpl implements TicketService {
             throw new NegocioException("El RU es obligatorio");
         }
         String ruTrim = ru.trim();
-        boolean marcarEntregado = parseEntregaFlag(entregaFlag);
+        EstadoEntregaCsv estado = parseEstadoEntrega(entregaFlag);
 
         Estudiante est = estudianteDao.findByRu(ruTrim)
                 .filter(e -> e.getEstado() == EstadoRegistro.ACTIVO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("No se encontró estudiante con RU: " + ruTrim));
 
         List<Ticket> tickets = ticketDao.findAllByEstudianteIdEstudiante(est.getIdEstudiante());
-        // Filtrar solo ACTIVOS para la respuesta; si no hay ninguno, es que no se emitió ticket
         var activos = tickets.stream().filter(t -> t.getEstado() == EstadoRegistro.ACTIVO).toList();
         if (activos.isEmpty()) {
             throw new NegocioException("El estudiante con RU '" + ruTrim + "' no tiene ticket emitido; emítalo primero");
         }
 
-        if (!marcarEntregado) {
-            // NO -> no marca entrega, solo devuelve el ticket tal cual (útil si se quiere verificar sin marcar)
+        if (estado == EstadoEntregaCsv.PENDIENTE) {
+            // NO -> si ya está NO (pendiente) no hace nada; si tiene SI o RECHAZADO actualiza a NO (pendiente)
+            boolean yaEsNo = activos.stream().allMatch(t -> !t.isEntregado() && !t.isRechazado());
+            if (yaEsNo) {
+                return toDetalleDto(activos.get(0));
+            }
+            for (Ticket t : activos) {
+                if (t.isEntregado() || t.isRechazado()) {
+                    t.setEntregado(false);
+                    t.setFechaEntrega(null);
+                    t.setRechazado(false);
+                    t.setFechaRechazo(null);
+                }
+            }
+            ticketDao.saveAll(activos);
+            return toDetalleDto(activos.get(0));
+        }
+        if (estado == EstadoEntregaCsv.RECHAZADO) {
+            Instant ahora = Instant.now();
+            for (Ticket t : activos) {
+                t.setRechazado(true);
+                t.setFechaRechazo(ahora);
+                t.setEntregado(false);
+                t.setFechaEntrega(null);
+            }
+            ticketDao.saveAll(activos);
             return toDetalleDto(activos.get(0));
         }
 
@@ -697,6 +818,8 @@ public class TicketServiceImpl implements TicketService {
         for (Ticket t : activos) {
             t.setEntregado(true);
             t.setFechaEntrega(ahora);
+            t.setRechazado(false);
+            t.setFechaRechazo(null);
         }
         ticketDao.saveAll(activos);
         return toDetalleDto(activos.get(0));
@@ -737,13 +860,13 @@ public class TicketServiceImpl implements TicketService {
                     if (ru == null || ru.isBlank()) {
                         throw new NegocioException("Falta el RU en columna 1");
                     }
-                    // Solo si es SI (o vacío) cuenta como entregado; NO no marca pero no es error
                     self.marcarEntregaPorRu(ru, entrega);
-                    boolean marcar = entrega == null || entrega.isBlank() || parseEntregaFlag(entrega);
-                    if (marcar) {
+                    EstadoEntregaCsv est = parseEstadoEntrega(entrega);
+                    if (est == EstadoEntregaCsv.ENTREGADO) {
                         resultado.setCreados(resultado.getCreados() + 1);
+                    } else if (est == EstadoEntregaCsv.RECHAZADO) {
+                        resultado.setRechazados(resultado.getRechazados() + 1);
                     } else {
-                        // NO sin marcar: lo contamos como actualizado para reflejar que se procesó
                         resultado.setActualizados(resultado.getActualizados() + 1);
                     }
                 } catch (NegocioException ex) {
@@ -879,6 +1002,8 @@ public class TicketServiceImpl implements TicketService {
         dto.setFechaImpresion(t.getFechaImpresion());
         dto.setEntregado(t.isEntregado());
         dto.setFechaEntrega(t.getFechaEntrega());
+        dto.setRechazado(t.isRechazado());
+        dto.setFechaRechazo(t.getFechaRechazo());
 
         dto.setIdPersona(t.getPersona().getIdPersona());
         dto.setNombreCompleto(t.getPersona().getNombreCompleto());

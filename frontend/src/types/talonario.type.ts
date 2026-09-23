@@ -155,6 +155,12 @@ export interface ReporteVentasTalonarioDto {
   totalDisponibles: number
   totalAnulados: number
   totalMontoVendido?: number | null
+  /** Entradas entregadas adm/doc como ventas (precio 125) */
+  totalEntregadosAdm: number
+  totalEntregadosDoc: number
+  totalEntregadosAdmDoc: number
+  montoEntregadosAdmDoc?: number | null
+  precioEntregadoAdmDoc?: number | null
 }
 
 /**

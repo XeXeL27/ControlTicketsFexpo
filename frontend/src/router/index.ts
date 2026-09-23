@@ -23,6 +23,7 @@ import Impresion from '@/views/Impresion.vue'
 import Entrega from '@/views/Entrega.vue'
 import ActualizacionEntrega from '@/views/ActualizacionEntrega.vue'
 import ActualizacionEntregaEstudiantes from '@/views/ActualizacionEntregaEstudiantes.vue'
+import VerificacionCodigos from '@/views/VerificacionCodigos.vue'
 // Huellas con biométricos ZKTeco (sincronización por RU)
 import Huellas from '@/views/Huellas.vue'
 
@@ -51,6 +52,7 @@ import ReporteConcierto from '@/views/reportes/ReporteConcierto.vue'
 import ReporteEstudiantes from '@/views/reportes/ReporteEstudiantes.vue'
 import ReporteVentas from '@/views/reportes/ReporteVentas.vue'
 import ReporteEntregas from '@/views/reportes/ReporteEntregas.vue'
+import ReporteNomina from '@/views/reportes/ReporteNomina.vue'
 
 // Grupos de roles permitidos por ruta (meta.roles). Sin `roles` = cualquier
 // usuario autenticado. Debe coincidir con los @PreAuthorize del backend y con
@@ -82,6 +84,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/entrega', component: Entrega, meta: { roles: ADMIN } },
   { path: '/actualizacion-entrega', component: ActualizacionEntrega, meta: { roles: ADMIN } },
   { path: '/actualizacion-estudiantes', component: ActualizacionEntregaEstudiantes, meta: { roles: ADMIN } },
+  { path: '/verificacion-codigos', component: VerificacionCodigos, meta: { roles: ADMIN } },
   { path: '/huellas', component: Huellas, meta: { roles: ADMIN } },
 
   // Control de acceso QR (CONTROL_CONCIERTO). Reportes queda solo ADMINISTRADOR.
@@ -110,6 +113,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/reportes/estudiantes', component: ReporteEstudiantes, meta: { roles: CONCIERTO } },
   { path: '/reportes/ventas', component: ReporteVentas, meta: { roles: ADMIN } },
   { path: '/reportes/entregas', component: ReporteEntregas, meta: { roles: ADMIN } },
+  { path: '/reportes/nomina', component: ReporteNomina, meta: { roles: ADMIN } },
 ]
 
 const router = createRouter({

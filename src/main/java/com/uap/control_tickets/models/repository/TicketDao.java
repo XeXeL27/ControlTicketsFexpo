@@ -85,6 +85,10 @@ public interface TicketDao extends JpaRepository<Ticket, Long> {
 
     long countByCategoriaAndEntregadoAndEstado(CategoriaTicket categoria, boolean entregado, EstadoRegistro estado);
 
+    long countByRechazadoAndEstado(boolean rechazado, EstadoRegistro estado);
+
+    long countByCategoriaAndRechazadoAndEstado(CategoriaTicket categoria, boolean rechazado, EstadoRegistro estado);
+
     // --- Monitoreo en tiempo real ---
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "persona")
     List<Ticket> findAllByDentroTrueAndEstado(EstadoRegistro estado);

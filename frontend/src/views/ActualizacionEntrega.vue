@@ -25,7 +25,7 @@ const alertas = useAlertas()
 // --- Actualización individual (de a uno) ---
 const codigoUno = ref('')
 const materiaUno = ref('')
-const entregaUno = ref<'SI' | 'NO'>('SI')
+const entregaUno = ref<'SI' | 'NO' | 'RECHAZADO'>('SI')
 const procesandoUno = ref(false)
 
 async function actualizarUno() {
@@ -37,10 +37,10 @@ async function actualizarUno() {
   procesandoUno.value = true
   try {
     const t = await actualizarEntregaPorCodigo(codigo, materiaUno.value.trim() || undefined, entregaUno.value)
-    const esSi = entregaUno.value === 'SI'
     const promo = materiaUno.value.trim() ? ` → docente (${materiaUno.value.trim()})` : ''
-    const entregaTxt = esSi ? 'marcado como entregado' : 'NO marcado como entregado'
-    // Si es NO sin materia y el backend devolvió error, ya lo captura el catch; aquí es éxito con materia
+    let entregaTxt = 'marcado como entregado'
+    if (entregaUno.value === 'NO') entregaTxt = 'NO marcado como entregado'
+    if (entregaUno.value === 'RECHAZADO') entregaTxt = 'marcado como NO ACEPTO / rechazado'
     alertas.exito(`Código ${codigo}${promo} — ${entregaTxt}${t.codigoIdentificacion ? ` (${t.codigoIdentificacion})` : ''}`)
   } catch (e) {
     alertas.error(mensajeError(e, 'No se pudo actualizar'))
@@ -94,18 +94,25 @@ function esEntregaSi(valor: string): boolean {
   return n === 'si' || n === 's' || n === 'yes' || n === '1' || n === 'true' || n === 'entregado' || n === ''
 }
 
+function esRechazado(valor: string): boolean {
+  const n = normalizar(valor).replace(/[^a-z0-9]/g, '')
+  return n === 'rechazado' || n === 'rechazada' || n === 'rechazo' || n === 'noacepto' || n === 'noacepta'
+}
+
 function accionDe(fila: { codigo: string; materia: string; entrega: string }): string {
   const cod = fila.codigo.trim()
   const mat = fila.materia.trim()
   const entregaRaw = fila.entrega.trim()
   if (!cod) return 'FALTA CÓDIGO'
   const tieneMat = !!mat
+  if (esRechazado(entregaRaw)) {
+    return tieneMat ? 'Rechazado → docente' : 'Rechazado'
+  }
   const esSi = entregaRaw === '' ? true : esEntregaSi(entregaRaw)
   const esNo = !esSi
   if (tieneMat && esSi) return 'Entregar → docente'
   if (tieneMat && esNo) return 'Solo a docente'
   if (!tieneMat && esSi) return 'Entregar'
-  // NO sin materia = fila sin efecto
   return 'Sin acción'
 }
 
@@ -117,7 +124,7 @@ function esEncabezado(linea: string, sep: string): boolean {
   const segunda = normalizar(c[1] || '')
   if (segunda.includes('materia') || segunda.includes('carrera') || segunda.includes('docente')) return true
   const tercera = normalizar(c[2] || '')
-  if (tercera.includes('entrega') || tercera === 'si' || tercera === 'no') return true
+  if (tercera.includes('entrega') || tercera.includes('entregado') || tercera.includes('rechaz') || tercera.includes('acepto') || tercera === 'si' || tercera === 'no') return true
   return false
 }
 
@@ -168,8 +175,9 @@ async function importar() {
   try {
     resultado.value = await actualizarEntregaPorCodigoCsv(archivo.value)
     const r = resultado.value
+    const rech = (r as any).rechazados ?? 0
     if (!r.errores.length) {
-      alertas.exito(`Listo: ${r.creados} entregado(s), ${r.actualizados} a docente`)
+      alertas.exito(`Listo: ${r.creados} entregado(s), ${r.actualizados} a docente, ${rech} rechazado(s)`)
     } else {
       alertas.info(`Procesadas ${r.totalFilas} · ${r.errores.length} con error`)
     }
@@ -192,7 +200,8 @@ const columnasPrevia: ColumnaTabla[] = [
 ]
 
 const promovidosPrevia = computed(() => previa.value.filter((f) => f.materia !== '—').length)
-const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.entrega) === 'si' || f.entrega === 'SI').length)
+const entregadosPrevia = computed(() => previa.value.filter((f) => f.entrega === 'SI').length)
+const rechazadosPrevia = computed(() => previa.value.filter((f) => esRechazado(f.entrega)).length)
 </script>
 
 <template>
@@ -201,14 +210,14 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
     <p class="ayuda" style="margin:0 0 16px">
       Col 1 = <code>código adm. o CI (carnet)</code> — si no pilla por código, busca por <code>CI</code> ·
       Col 2 = <code>materia/carrera</code> (si tiene dato → promueve a <strong>docente</strong>) ·
-      Col 3 = <code>SI / NO</code> → <strong>SI</strong> marca <code>entregado</code> (+ promueve si hay materia),
-      <strong>NO</strong> con materia = solo promueve a docente, <strong>no</strong> marca entregado. Mismo QR/código.
+      Col 3 = <code>SI / NO / RECHAZADO</code> → <strong>SI</strong> marca <code>entregado</code>,
+      <strong>NO</strong> con materia = solo promueve a docente, <strong>RECHAZADO / NO ACEPTO</strong> = marca <code style="color:#dc2626">no acepto</code> (excluyente con entregado).
     </p>
 
     <!-- De a uno -->
     <div class="card" style="margin-bottom:16px">
       <strong>Actualizar de a uno</strong>
-      <p class="ayuda">Equivale a una fila del CSV: código o CI | materia | SI/NO.</p>
+      <p class="ayuda">Equivale a una fila del CSV: código o CI | materia | SI/NO/RECHAZADO.</p>
       <div class="fila" style="gap:10px;flex-wrap:wrap;align-items:end">
         <label style="flex:1;min-width:160px">
           Código adm. o CI *
@@ -218,11 +227,12 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
           Materia / carrera (opcional)
           <input v-model="materiaUno" placeholder="Ej. Matemática I" :disabled="procesandoUno" />
         </label>
-        <label style="min-width:140px">
+        <label style="min-width:160px">
           Entrega *
           <select v-model="entregaUno" :disabled="procesandoUno">
             <option value="SI">SI — marcar entregado</option>
             <option value="NO">NO — solo a docente</option>
+            <option value="RECHAZADO">RECHAZADO — no acepto</option>
           </select>
         </label>
         <button :disabled="procesandoUno || !codigoUno.trim()" @click="actualizarUno">
@@ -238,16 +248,16 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
     <div class="card" style="margin-bottom:16px">
       <strong>Carga masiva por CSV</strong>
       <p class="ayuda">
-        Archivo <code>.csv</code> con 3 columnas: <code>código adm. o CI , materia , SI/NO</code>
+        Archivo <code>.csv</code> con 3 columnas: <code>código adm. o CI , materia , SI/NO/RECHAZADO</code>
         (separador <code>,</code> o <code>;</code>). Col 1 acepta código adm. o <code>CI (carnet)</code> si el código no existe.
-        Col 2 y 3 pueden ir vacías: vacía en col 3 = <code>SI</code> por compatibilidad.
+        Col 2 y 3 pueden ir vacías: vacía en col 3 = <code>SI</code>. <code>RECHAZADO / NO ACEPTO</code> marca <code style="color:#dc2626">no acepto</code>.
         Encabezado con <code>código / materia / entrega</code> se saltea solo.
       </p>
 
       <CsvDropzone
         v-model="archivo"
         :deshabilitado="importando"
-        ayuda="CSV con 3 columnas: código adm. o CI , materia , SI/NO"
+        ayuda="CSV con 3 columnas: código adm. o CI , materia , SI/NO/RECHAZADO"
         @elegido="alElegir"
         @quitado="quitarArchivo"
       >
@@ -267,6 +277,10 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
           <div class="dato">
             <span class="numero" style="color:var(--verde)">{{ entregadosPrevia }}</span>
             <span class="etiqueta">con SI (entrega)</span>
+          </div>
+          <div class="dato" style="border-color:#fecaca;background:#fef2f2">
+            <span class="numero" style="color:#dc2626">{{ rechazadosPrevia }}</span>
+            <span class="etiqueta">rechazados</span>
           </div>
           <div class="dato">
             <span class="numero" style="color:var(--azul)">{{ promovidosPrevia }}</span>
@@ -298,11 +312,13 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
                 <td>
                   <span v-if="f.entrega==='SI'" class="chip" style="background:#dcfce7;color:#166534">SI</span>
                   <span v-else-if="f.entrega==='NO'" class="chip" style="background:#fee2e2;color:#991b1b">NO</span>
+                  <span v-else-if="esRechazado(f.entrega)" class="chip" style="background:#991b1b;color:#fff">NO ACEPTO</span>
                   <span v-else>{{ f.entrega }}</span>
                 </td>
                 <td>
                   <span v-if="f.accion === 'FALTA CÓDIGO'" class="error">{{ f.accion }}</span>
                   <span v-else-if="f.accion === 'Sin acción'" class="error">{{ f.accion }}</span>
+                  <span v-else-if="f.accion.includes('Rechazado')" class="chip" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;font-weight:700">{{ f.accion }}</span>
                   <span v-else-if="f.accion.includes('docente')" class="chip" style="background:#dbeafe;color:#1e40af">{{ f.accion }}</span>
                   <span v-else class="chip" style="background:#dcfce7;color:#166534">{{ f.accion }}</span>
                 </td>
@@ -317,7 +333,7 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
 
       <Alerta v-if="resultado" :tipo="resultado.errores.length ? 'info' : 'exito'" cerrable @cerrar="resultado = null" style="margin-top:16px">
         Procesadas {{ resultado.totalFilas }} · entregados {{ resultado.creados }}
-        · a docente {{ resultado.actualizados }}
+        · a docente {{ resultado.actualizados }} · rechazados {{ (resultado as any).rechazados ?? 0 }}
         <span v-if="resultado.errores.length">· {{ resultado.errores.length }} con error</span>
         <ul v-if="resultado.errores.length" style="margin:6px 0 0;padding-left:18px">
           <li v-for="er in resultado.errores" :key="er.fila">Fila {{ er.fila }}: {{ er.motivo }}</li>
@@ -326,7 +342,7 @@ const entregadosPrevia = computed(() => previa.value.filter((f) => normalizar(f.
     </div>
 
     <p class="ayuda">
-      Endpoints: <code>POST /api/tickets/entrega-por-codigo?codigoAdm=&amp;materia=&amp;entrega=SI|NO</code>
+      Endpoints: <code>POST /api/tickets/entrega-por-codigo?codigoAdm=&amp;materia=&amp;entrega=SI|NO|RECHAZADO</code>
       y <code>POST /api/tickets/entrega-por-codigo/csv</code> (campo <code>archivo</code>). Cada fila en su propia transacción.
     </p>
   </div>

@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from 'vue'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx'
 import Alerta from '@/components/Alerta.vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import { useAlertas } from '@/composables/useAlertas'
@@ -21,6 +22,7 @@ const reporte = ref<ReporteVentasTalonarioDto | null>(null)
 const cargando = ref(false)
 const error = ref('')
 const exportando = ref(false)
+const exportandoExcel = ref(false)
 const vista = ref<'detalle' | 'eventos'>('detalle')
 const gruposEvento = computed(() => {
   const grupos = new Map<string, { evento: string; filas: FilaPdfVentas[]; vendidos: number; monto: number; tieneMonto: boolean }>()
@@ -161,17 +163,39 @@ async function exportarPdf(): Promise<void> {
           didDrawPage: (datos) => { siguienteY = (datos.cursor?.y ?? 14) + 8 },
         })
       }
+      // Entradas entregadas adm/doc como ventas (Bs 125 c/u)
+      if (reporte.value.totalEntregadosAdmDoc > 0) {
+        const precio = reporte.value.precioEntregadoAdmDoc ?? 125
+        autoTable(doc, {
+          startY: siguienteY, ...estilosTablaReporte(), pageBreak: 'avoid',
+          margin: { top: 14, bottom: 20 },
+          head: [['Entradas entregadas (como venta)', 'Cantidad', 'Recaudado']],
+          body: [
+            ['Administrativos', reporte.value.totalEntregadosAdm, dinero(precio * reporte.value.totalEntregadosAdm)],
+            ['Docentes', reporte.value.totalEntregadosDoc, dinero(precio * reporte.value.totalEntregadosDoc)],
+          ],
+          foot: [['TOTAL entregados adm/doc', reporte.value.totalEntregadosAdmDoc, dinero(reporte.value.montoEntregadosAdmDoc ?? null)]],
+          didDrawPage: (datos) => { siguienteY = (datos.cursor?.y ?? 14) + 6 },
+        })
+      }
+      const totalVendidosConEntregados = totalEvento.value + (reporte.value.totalEntregadosAdmDoc ?? 0)
+      const totalMontoConEntregados = (() => {
+        const a = totalRecaudado.value
+        const b = reporte.value.montoEntregadosAdmDoc ?? null
+        if (a == null && b == null) return null
+        return (a ?? 0) + (b ?? 0)
+      })()
       autoTable(doc, {
         startY: siguienteY, ...estilosTablaReporte(), pageBreak: 'avoid',
         margin: { top: 14, bottom: 20 },
         head: [['Resumen', 'Cantidad vendida', 'Recaudado']],
-        foot: [['TOTAL GENERAL', totalEvento.value, dinero(totalRecaudado.value)]],
+        foot: [['TOTAL GENERAL (incl. entregados)', totalVendidosConEntregados, dinero(totalMontoConEntregados)]],
         didDrawPage: (datos) => { siguienteY = (datos.cursor?.y ?? 14) + 6 },
       })
       if (siguienteY > doc.internal.pageSize.getHeight() - 26) { doc.addPage(); siguienteY = 16 }
       doc.setFontSize(9)
       doc.setTextColor(100, 116, 139)
-      doc.text('Recaudado = vendidos × precio. Los talonarios sin precio no suman al monto.', 14, siguienteY)
+      doc.text('Recaudado = vendidos × precio. Talonarios sin precio no suman. Entregados adm/doc a Bs 125 c/u.', 14, siguienteY)
       pieReporte(doc)
       doc.save('ventas-evento-tipo.pdf')
       alertas.exito('PDF descargado')
@@ -220,6 +244,25 @@ async function exportarPdf(): Promise<void> {
       ]],
     })
 
+    // Entradas entregadas adm/doc como ventas (Bs 125 c/u)
+    if (reporte.value.totalEntregadosAdmDoc > 0) {
+      const precio = reporte.value.precioEntregadoAdmDoc ?? 125
+      autoTable(doc, {
+        ...estilosTablaReporte(),
+        head: [['Entradas entregadas (como venta)', 'Cantidad', 'Precio unitario', 'Monto (Bs)']],
+        body: [
+          ['Administrativos', reporte.value.totalEntregadosAdm, `Bs ${precio}`, reporte.value.totalEntregadosAdm * precio],
+          ['Docentes', reporte.value.totalEntregadosDoc, `Bs ${precio}`, reporte.value.totalEntregadosDoc * precio],
+        ],
+        foot: [[
+          'TOTAL entregados adm/doc',
+          reporte.value.totalEntregadosAdmDoc,
+          '',
+          reporte.value.montoEntregadosAdmDoc ?? '—',
+        ]],
+      })
+    }
+
     pieReporte(doc)
     doc.save('reporte-general-ventas.pdf')
     alertas.exito('PDF descargado')
@@ -227,6 +270,64 @@ async function exportarPdf(): Promise<void> {
     alertas.error(mensajeError(e, 'No se pudo generar el PDF'))
   } finally {
     exportando.value = false
+  }
+}
+
+async function exportarExcel(): Promise<void> {
+  if (!reporte.value || exportandoExcel.value) return
+  exportandoExcel.value = true
+  try {
+    const wb = XLSX.utils.book_new()
+    // Resumen general
+    const resumen: (string | number)[][] = [
+      ['Reporte general de ventas'],
+      [`Generado ${new Date().toLocaleString('es-BO')}`],
+      [],
+      ['Concepto', 'Total boletos', 'Vendidos', 'Disponibles', 'Anulados', 'Monto (Bs)'],
+      ['General', reporte.value.totalBoletos, reporte.value.totalVendidos, reporte.value.totalDisponibles, reporte.value.totalAnulados, reporte.value.totalMontoVendido ?? '—'],
+    ]
+    const wsResumen = XLSX.utils.aoa_to_sheet(resumen)
+    wsResumen['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }]
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen')
+
+    // Detalle talonarios
+    const filasExcel: (string | number)[][] = [
+      ['Talonario', 'Destino', 'Evento', 'Rango', 'A cargo', 'Vendidos', 'Disponibles', 'Anulados', 'Monto'],
+    ]
+    filas.value.forEach((t) => {
+      filasExcel.push([t.nombre as string, t.destinoEtiqueta as string, t.tipoEtiqueta as string, t.rango as string, t.vendedora as string, t.vendidos as number, t.disponibles as number, t.anulados as number, t.monto as string])
+    })
+    const wsTalon = XLSX.utils.aoa_to_sheet(filasExcel)
+    wsTalon['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 14 }]
+    XLSX.utils.book_append_sheet(wb, wsTalon, 'Talonarios')
+
+    // Por vendedora
+    const vend: (string | number)[][] = [['Vendedora', 'Boletos vendidos', 'Monto']]
+    filasVendedora.value.forEach((v) => vend.push([v.vendedora as string, v.vendidos as number, v.montoTexto as string]))
+    const wsVend = XLSX.utils.aoa_to_sheet(vend)
+    wsVend['!cols'] = [{ wch: 24 }, { wch: 16 }, { wch: 16 }]
+    XLSX.utils.book_append_sheet(wb, wsVend, 'Por vendedora')
+
+    // Entregados adm/doc como ventas
+    if (reporte.value.totalEntregadosAdmDoc > 0) {
+      const precio = reporte.value.precioEntregadoAdmDoc ?? 125
+      const ent: (string | number)[][] = [
+        ['Entradas entregadas (como venta)', 'Cantidad', 'Precio unitario', 'Monto (Bs)'],
+        ['Administrativos', reporte.value.totalEntregadosAdm, `Bs ${precio}`, reporte.value.totalEntregadosAdm * precio],
+        ['Docentes', reporte.value.totalEntregadosDoc, `Bs ${precio}`, reporte.value.totalEntregadosDoc * precio],
+        ['TOTAL entregados', reporte.value.totalEntregadosAdmDoc, '', reporte.value.montoEntregadosAdmDoc ?? '—'],
+      ]
+      const wsEnt = XLSX.utils.aoa_to_sheet(ent)
+      wsEnt['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 16 }, { wch: 16 }]
+      XLSX.utils.book_append_sheet(wb, wsEnt, 'Entregados')
+    }
+
+    XLSX.writeFile(wb, vista.value === 'eventos' ? 'ventas-evento-tipo.xlsx' : 'reporte-general-ventas.xlsx')
+    alertas.exito('Excel descargado')
+  } catch (e) {
+    alertas.error(mensajeError(e, 'No se pudo generar el Excel'))
+  } finally {
+    exportandoExcel.value = false
   }
 }
 
@@ -240,10 +341,13 @@ onMounted(() => void cargar())
         <h2>Reportes — Ventas por talonario</h2>
         <p class="subtitulo">Todos los talonarios vendidos: avance, vendedoras y montos.</p>
       </div>
-      <div class="fila">
+      <div class="fila" style="gap:8px">
         <button class="secundario" :disabled="cargando" @click="cargar">Actualizar</button>
         <button :disabled="!reporte || exportando" @click="exportarPdf">
           {{ exportando ? 'Generando…' : 'Exportar PDF' }}
+        </button>
+        <button :disabled="!reporte || exportandoExcel" @click="exportarExcel">
+          {{ exportandoExcel ? 'Generando…' : 'Exportar Excel' }}
         </button>
       </div>
     </div>
@@ -278,11 +382,11 @@ onMounted(() => void cargar())
     <div v-if="reporte && vista === 'detalle'" class="resumen">
       <div class="dato">
         <span class="numero">{{ reporte.totalVendidos }}</span>
-        <span class="etiqueta">boletos vendidos</span>
+        <span class="etiqueta">boletos vendidos (incl. entregados)</span>
       </div>
       <div class="dato total">
         <span class="numero">{{ montoCorto(reporte.totalMontoVendido) }}</span>
-        <span class="etiqueta">recaudado</span>
+        <span class="etiqueta">recaudado (incl. entregados)</span>
       </div>
       <div class="dato">
         <span class="numero">{{ reporte.totalDisponibles }}</span>
@@ -296,6 +400,29 @@ onMounted(() => void cargar())
         <span class="numero">{{ reporte.totalTalonarios }}</span>
         <span class="etiqueta">talonarios ({{ reporte.totalBoletos }} boletos)</span>
       </div>
+    </div>
+
+    <div v-if="reporte && vista === 'detalle'" class="card" style="background:#f0fdf4;border-color:#86efac">
+      <h3 style="margin:0 0 8px">Entradas entregadas (adm/doc) — como ventas</h3>
+      <div class="resumen" style="margin:0">
+        <div class="dato">
+          <span class="numero" style="color:#166534">{{ reporte.totalEntregadosAdmDoc }}</span>
+          <span class="etiqueta">entradas entregadas</span>
+        </div>
+        <div class="dato">
+          <span class="numero">{{ reporte.totalEntregadosAdm }}</span>
+          <span class="etiqueta">administrativos</span>
+        </div>
+        <div class="dato">
+          <span class="numero">{{ reporte.totalEntregadosDoc }}</span>
+          <span class="etiqueta">docentes</span>
+        </div>
+        <div class="dato total">
+          <span class="numero">{{ montoCorto(reporte.montoEntregadosAdmDoc as any) }}</span>
+          <span class="etiqueta">a Bs {{ reporte.precioEntregadoAdmDoc ?? 125 }} c/u</span>
+        </div>
+      </div>
+      <p class="nota" style="margin:8px 0 0">Cada entrada entregada a docente/administrativo cuenta como boleto vendido a Bs 125 y suma al total general.</p>
     </div>
 
     <div v-if="vista === 'detalle'" class="card">

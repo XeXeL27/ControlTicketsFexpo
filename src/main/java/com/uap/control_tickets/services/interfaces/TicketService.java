@@ -61,8 +61,14 @@ public interface TicketService {
     /** Marca o desmarca un ticket como impreso (por si hubo que reimprimir uno). */
     void marcarImpreso(Long idTicket, boolean impreso);
 
-    /** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+    /** Marca o desmarca un ticket como ENTREGADO (control de entrega física). Excluyente con rechazado. */
     TicketDetalleDto marcarEntrega(Long idTicket, boolean entregado);
+
+    /** Marca o desmarca un ticket como RECHAZADO / NO ACEPTO. Excluyente con entregado. */
+    TicketDetalleDto marcarRechazado(Long idTicket, boolean rechazado);
+
+    /** Cambia el estado a PENDIENTE/ENTREGADO/RECHAZADO (para la pantalla Entrega). */
+    TicketDetalleDto actualizarEstadoEntrega(Long idTicket, String estado);
 
     /** Vuelve a dejar como no impresos todos los tickets de una categoria (reinicia esa tanda). */
     int reiniciarImpresion(CategoriaTicket categoria);
@@ -70,13 +76,14 @@ public interface TicketService {
     /**
      * Busca por código administrativo, marca su ticket como ENTREGADO y,
      * si la segunda columna trae texto, lo promueve a DOCENTE con ese texto como carrera/materia.
-     * La tercera columna (SI/NO) controla si se marca como entregado.
+     * La tercera columna (SI/NO/RECHAZADO) controla el estado de entrega.
      *
-     * Regla: SI -> marca entregado (+ promueve si hay materia); NO + materia -> solo promueve a docente, NO marca entregado.
+     * Regla: SI -> marca entregado (+ promueve si hay materia); NO + materia -> solo promueve a docente, queda pendiente;
+     * RECHAZADO/NO ACEPTO -> marca rechazado (+ promueve si hay materia), excluyente con entregado.
      *
-     * @param codigoAdm código administrativo (columna 1 del CSV)
-     * @param materia   texto de la columna 2; si es null/vacío solo marca entrega, si trae dato convierte a docente
-     * @param entregaFlag texto de la columna 3 (SI/NO); null/vacío = SI por compatibilidad; NO = no marca entrega
+     * @param codigoAdm código administrativo o CI (columna 1) — si no pilla por código busca por CI
+     * @param materia   texto de la columna 2; si es null/vacío solo cambia entrega, si trae dato convierte a docente
+     * @param entregaFlag texto de la columna 3 (SI/NO/RECHAZADO); null/vacío = SI por compatibilidad
      */
     TicketDetalleDto actualizarPorCodigoAdm(String codigoAdm, String materia, String entregaFlag);
 
@@ -96,7 +103,7 @@ public interface TicketService {
     /** Marca como ENTREGADO el/los tickets del estudiante con ese RU. */
     TicketDetalleDto marcarEntregaPorRu(String ru);
 
-    /** Marca como ENTREGADO el/los tickets del estudiante con ese RU, con flag SI/NO opcional. */
+    /** Marca como ENTREGADO/RECHAZADO el/los tickets del estudiante con ese RU. entregaFlag = SI/NO/RECHAZADO */
     TicketDetalleDto marcarEntregaPorRu(String ru, String entregaFlag);
 
     /** CSV con 1 columna (RU) -> marca entregado a cada estudiante listado. */

@@ -19,6 +19,8 @@ public class ImportacionResultadoDto {
     private int creados;
     /** Estudiantes cuyo RU ya existia y se actualizaron con los datos del archivo. */
     private int actualizados;
+    /** Filas marcadas como rechazado / no acepto (entregas administrativas/estudiantiles). */
+    private int rechazados;
     private List<ErrorFila> errores = new ArrayList<>();
 
     public void agregarError(int fila, String motivo) {

@@ -13,6 +13,10 @@ export interface TicketDetalleDto {
   entregado: boolean
   /** Cuando se marcó la entrega (ISO-8601), null si todavía no. */
   fechaEntrega?: string
+  /** true = la persona rechazó / no aceptó la entrada. */
+  rechazado: boolean
+  /** Cuando se marcó como rechazado (ISO-8601), null si no. */
+  fechaRechazo?: string | null
   idPersona: number
   nombreCompleto: string
   ci: string

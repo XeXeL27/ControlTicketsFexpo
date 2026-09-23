@@ -22,4 +22,12 @@ public class ReporteVentasTalonarioDto {
     private long totalAnulados;
     /** Suma de montos de talonarios con precio. null si ninguno tiene precio. */
     private BigDecimal totalMontoVendido;
+
+    /** Tickets entregados de adm/doc como boletos vendidos (precio 125 c/u). */
+    private long totalEntregadosAdm;
+    private long totalEntregadosDoc;
+    private long totalEntregadosAdmDoc;
+    private BigDecimal montoEntregadosAdmDoc;
+    /** Precio fijo de cada entrada entregada adm/doc. */
+    private BigDecimal precioEntregadoAdmDoc;
 }

@@ -134,16 +134,32 @@ public class TicketController {
     }
 
     @PatchMapping("/entrega")
-    @Operation(summary = "Marca o desmarca un ticket como ENTREGADO (control de entrega física)")
+    @Operation(summary = "Marca o desmarca un ticket como ENTREGADO (control de entrega física) — excluyente con rechazado")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<TicketDetalleDto> marcarEntrega(@RequestParam Long idTicket,
                                                           @RequestParam boolean entregado) {
         return ResponseEntity.ok(ticketService.marcarEntrega(idTicket, entregado));
     }
 
+    @PatchMapping("/rechazo")
+    @Operation(summary = "Marca o desmarca un ticket como RECHAZADO / NO ACEPTO — excluyente con entregado")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> marcarRechazo(@RequestParam Long idTicket,
+                                                          @RequestParam boolean rechazado) {
+        return ResponseEntity.ok(ticketService.marcarRechazado(idTicket, rechazado));
+    }
+
+    @PatchMapping("/estado-entrega")
+    @Operation(summary = "Cambia estado de entrega a PENDIENTE / ENTREGADO / RECHAZADO")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    public ResponseEntity<TicketDetalleDto> estadoEntrega(@RequestParam Long idTicket,
+                                                          @RequestParam String estado) {
+        return ResponseEntity.ok(ticketService.actualizarEstadoEntrega(idTicket, estado));
+    }
+
     @PostMapping("/entrega-por-codigo")
-    @Operation(summary = "Actualiza por código adm: col2=materia, col3=SI/NO entrega",
-            description = "codigoAdm=col1, materia=col2 opcional->Docente.carrera, entrega=col3 SI/NO (SI=marca entregado, NO+con materia=solo promueve a docente)")
+    @Operation(summary = "Actualiza por código adm: col2=materia, col3=SI/NO/RECHAZADO",
+            description = "codigoAdm=col1 (código o CI), materia=col2 opcional->Docente.carrera, entrega=col3 SI/NO/RECHAZADO o NO ACEPTO (RECHAZADO marca rechazado, excluyente con entregado)")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<TicketDetalleDto> entregaPorCodigo(@RequestParam String codigoAdm,
                                                              @RequestParam(required = false) String materia,
@@ -152,8 +168,8 @@ public class TicketController {
     }
 
     @PostMapping(value = "/entrega-por-codigo/csv", consumes = "multipart/form-data")
-    @Operation(summary = "Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO) -> entrega y promoción",
-            description = "CSV por posición: col1=codigo administrativo (obligatoria), col2=materia/carrera (opcional), col3=SI/NO (SI=marca entregado, NO+solo promueve si hay materia)")
+    @Operation(summary = "Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO/RECHAZADO) -> entrega y promoción",
+            description = "CSV por posición: col1=codigo administrativo o CI (obligatoria), col2=materia/carrera (opcional), col3=SI/NO/RECHAZADO (RECHAZADO marca no acepto)")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto> entregaPorCodigoCsv(
             @RequestParam("archivo") org.springframework.web.multipart.MultipartFile archivo) {
@@ -163,8 +179,8 @@ public class TicketController {
     // --- Estudiantes: entrega por RU (1 columna CSV) ---
 
     @PostMapping("/entrega-por-ru")
-    @Operation(summary = "Marca entregado el ticket del estudiante por RU (1 columna)",
-            description = "ru=RU del estudiante (col 1); entrega=SI/NO opcional (default SI)")
+    @Operation(summary = "Marca entregado/rechazado el ticket del estudiante por RU",
+            description = "ru=RU del estudiante (col 1); entrega=SI/NO/RECHAZADO opcional (default SI)")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<TicketDetalleDto> entregaPorRu(@RequestParam String ru,
                                                          @RequestParam(required = false) String entrega) {
@@ -172,8 +188,8 @@ public class TicketController {
     }
 
     @PostMapping(value = "/entrega-por-ru/csv", consumes = "multipart/form-data")
-    @Operation(summary = "Masivo estudiantes: CSV con 1 columna (RU) -> marca entregado",
-            description = "CSV por posición: col1=RU (obligatoria), col2=SI/NO opcional; marca entregado solo si col2=SI o vacía")
+    @Operation(summary = "Masivo estudiantes: CSV con 1 columna (RU) -> marca entregado/rechazado",
+            description = "CSV por posición: col1=RU (obligatoria), col2=SI/NO/RECHAZADO opcional")
     @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<com.uap.control_tickets.dto.estudiante.ImportacionResultadoDto> entregaPorRuCsv(
             @RequestParam("archivo") org.springframework.web.multipart.MultipartFile archivo) {

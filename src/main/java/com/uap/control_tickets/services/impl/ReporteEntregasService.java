@@ -35,7 +35,10 @@ public class ReporteEntregasService {
         long totalEntregados = dto.getEstudiantes().getEntregados()
                 + dto.getAdministrativos().getEntregados()
                 + dto.getDocentes().getEntregados();
-        long pendientes = totalTickets - totalEntregados;
+        long totalRechazados = dto.getEstudiantes().getRechazados()
+                + dto.getAdministrativos().getRechazados()
+                + dto.getDocentes().getRechazados();
+        long pendientes = totalTickets - totalEntregados - totalRechazados;
         double pct = totalTickets == 0 ? 0 : (totalEntregados * 100.0 / totalTickets);
 
         ResumenEntregasDto.CategoriaEntrega total = new ResumenEntregasDto.CategoriaEntrega();
@@ -43,6 +46,7 @@ public class ReporteEntregasService {
         total.setEtiqueta("Total");
         total.setTotal(totalTickets);
         total.setEntregados(totalEntregados);
+        total.setRechazados(totalRechazados);
         total.setPendientes(pendientes);
         total.setPorcentaje(pct);
         dto.setTotal(total);
@@ -53,7 +57,8 @@ public class ReporteEntregasService {
     private ResumenEntregasDto.CategoriaEntrega categoria(CategoriaTicket cat, String etiqueta) {
         long total = ticketDao.countByCategoriaAndEstado(cat, EstadoRegistro.ACTIVO);
         long entregados = ticketDao.countByCategoriaAndEntregadoAndEstado(cat, true, EstadoRegistro.ACTIVO);
-        long pendientes = total - entregados;
+        long rechazados = ticketDao.countByCategoriaAndRechazadoAndEstado(cat, true, EstadoRegistro.ACTIVO);
+        long pendientes = total - entregados - rechazados;
         double pct = total == 0 ? 0 : (entregados * 100.0 / total);
 
         ResumenEntregasDto.CategoriaEntrega c = new ResumenEntregasDto.CategoriaEntrega();
@@ -61,6 +66,7 @@ public class ReporteEntregasService {
         c.setEtiqueta(etiqueta);
         c.setTotal(total);
         c.setEntregados(entregados);
+        c.setRechazados(rechazados);
         c.setPendientes(pendientes);
         c.setPorcentaje(pct);
         return c;

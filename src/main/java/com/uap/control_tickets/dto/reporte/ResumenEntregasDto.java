@@ -34,7 +34,9 @@ public class ResumenEntregasDto {
         private long total;
         /** Tickets con entregado=true */
         private long entregados;
-        /** Pendientes = total - entregados */
+        /** Tickets con rechazado=true */
+        private long rechazados;
+        /** Pendientes = total - entregados - rechazados */
         private long pendientes;
         /** Porcentaje entregados (0-100, 0 si total=0) */
         private double porcentaje;

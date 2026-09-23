@@ -31,10 +31,24 @@ export function emitirTicketDocente(idDocente: number) {
     .then((r) => r.data)
 }
 
-/** Marca o desmarca un ticket como ENTREGADO (control de entrega física). */
+/** Marca o desmarca un ticket como ENTREGADO (excluyente con rechazado). */
 export function marcarEntrega(idTicket: number, entregado: boolean) {
   return http
     .patch<TicketDetalleDto>('/tickets/entrega', null, { params: { idTicket, entregado } })
+    .then((r) => r.data)
+}
+
+/** Marca o desmarca un ticket como RECHAZADO / NO ACEPTO (excluyente con entregado). */
+export function marcarRechazado(idTicket: number, rechazado: boolean) {
+  return http
+    .patch<TicketDetalleDto>('/tickets/rechazo', null, { params: { idTicket, rechazado } })
+    .then((r) => r.data)
+}
+
+/** Cambia estado a PENDIENTE / ENTREGADO / RECHAZADO */
+export function actualizarEstadoEntrega(idTicket: number, estado: 'ENTREGADO' | 'RECHAZADO' | 'PENDIENTE') {
+  return http
+    .patch<TicketDetalleDto>('/tickets/estado-entrega', null, { params: { idTicket, estado } })
     .then((r) => r.data)
 }
 
@@ -121,8 +135,8 @@ export function reiniciarImpresion(categoria: CategoriaTicket = 'ESTUDIANTE') {
 }
 
 /**
- * Actualiza por código adm: col2=materia, col3=SI/NO entrega.
- * SI -> marca entregado (+ promueve si hay materia); NO+con materia -> solo promueve a docente.
+ * Actualiza por código adm: col2=materia, col3=SI/NO/RECHAZADO.
+ * SI -> entregado (+ promueve), NO -> solo docente, RECHAZADO/NO ACEPTO -> rechazado.
  * Backend: POST /tickets/entrega-por-codigo?codigoAdm=&materia=&entrega=
  */
 export function actualizarEntregaPorCodigo(codigoAdm: string, materia?: string, entrega?: string) {
@@ -134,8 +148,8 @@ export function actualizarEntregaPorCodigo(codigoAdm: string, materia?: string, 
 }
 
 /**
- * Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO). Cada fila marca entrega
- * solo si col3=SI y promueve a docente si col2 trae dato (independiente).
+ * Masivo: CSV con 3 columnas (codigo_adm, materia, SI/NO/RECHAZADO). Cada fila marca entrega
+ * solo si col3=SI / rechazado si RECHAZADO, y promueve a docente si col2 trae dato.
  * Backend: POST /tickets/entrega-por-codigo/csv  multipart campo "archivo"
  */
 export function actualizarEntregaPorCodigoCsv(archivo: File) {

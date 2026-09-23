@@ -1,13 +1,13 @@
 <script setup lang="ts">
-// Control de ENTREGA de tickets: marcar a quién se le entregó el ticket físico y a
-// quién no. Es un control aparte de la impresión: un ticket puede estar impreso pero
-// todavía sin entregar. Busca por código/nombre/CI, filtra Entregados/Pendientes y
-// marca por fila. Quién marcó queda en la auditoría del backend.
+// Control de ENTREGA de tickets: marcar a quién se le entregó el ticket físico,
+// quién lo rechazó / no aceptó, y quién sigue pendiente. Es un control aparte
+// de la impresión: un ticket puede estar impreso pero todavía sin entregar.
+// Quién marcó queda en la auditoría del backend.
 import { computed, ref, onMounted } from 'vue'
 import TablaDatos from '@/components/TablaDatos.vue'
 import { mensajeError } from '@/utils/errores'
 import { useAlertas } from '@/composables/useAlertas'
-import { listarTickets, marcarEntrega } from '@/api/ticket.service'
+import { listarTickets, actualizarEstadoEntrega } from '@/api/ticket.service'
 import type { CategoriaTicket, TicketDetalleDto } from '@/types/ticket.type'
 import type { ColumnaTabla } from '@/types/tabla.type'
 
@@ -15,10 +15,10 @@ const alertas = useAlertas()
 
 const tickets = ref<TicketDetalleDto[]>([])
 const cargando = ref(false)
-const guardando = ref<number | null>(null) // idTicket que se está marcando
+const guardando = ref<number | null>(null)
 
 // Filtros: por estado de entrega y por categoría.
-const verEstado = ref<'todos' | 'entregados' | 'pendientes'>('todos')
+const verEstado = ref<'todos' | 'entregados' | 'pendientes' | 'rechazados'>('todos')
 const categoria = ref<'' | CategoriaTicket>('')
 
 const CAT_NOMBRE: Record<CategoriaTicket, string> = {
@@ -33,18 +33,20 @@ const columnas: ColumnaTabla[] = [
   { clave: 'nombreCompleto', titulo: 'Nombre completo' },
   { clave: 'ci', titulo: 'CI', ancho: '120px' },
   { clave: 'categoria', titulo: 'Categoría', ancho: '140px' },
-  { clave: 'entregado', titulo: 'Entrega', ancho: '170px', buscable: false },
+  { clave: 'estadoEntrega', titulo: 'Entrega', ancho: '190px', buscable: false },
 ]
 
 const entregados = computed(() => tickets.value.filter((t) => t.entregado))
-const pendientes = computed(() => tickets.value.filter((t) => !t.entregado))
+const rechazados = computed(() => tickets.value.filter((t) => (t as any).rechazado))
+const pendientes = computed(() => tickets.value.filter((t) => !t.entregado && !(t as any).rechazado))
 
 /** Tickets que ve la tabla, según los dos filtros (el buscador lo aplica TablaDatos). */
 const filas = computed(() => {
   let r = tickets.value
   if (categoria.value) r = r.filter((t) => t.categoria === categoria.value)
   if (verEstado.value === 'entregados') r = r.filter((t) => t.entregado)
-  else if (verEstado.value === 'pendientes') r = r.filter((t) => !t.entregado)
+  else if (verEstado.value === 'pendientes') r = r.filter((t) => !t.entregado && !(t as any).rechazado)
+  else if (verEstado.value === 'rechazados') r = r.filter((t) => (t as any).rechazado)
   return r
 })
 
@@ -59,13 +61,14 @@ async function cargar() {
   }
 }
 
-async function alternarEntrega(t: TicketDetalleDto) {
+async function cambiarEstado(t: TicketDetalleDto, estado: 'ENTREGADO' | 'RECHAZADO' | 'PENDIENTE') {
   guardando.value = t.idTicket
   try {
-    const actualizado = await marcarEntrega(t.idTicket, !t.entregado)
-    // Actualiza la fila en el lugar (no recarga toda la lista).
+    const actualizado = await actualizarEstadoEntrega(t.idTicket, estado)
     Object.assign(t, actualizado)
-    alertas.exito(actualizado.entregado ? 'Marcado como entregado' : 'Marcado como pendiente')
+    if (estado === 'ENTREGADO') alertas.exito('Marcado como entregado')
+    else if (estado === 'RECHAZADO') alertas.exito('Marcado como no acepto / rechazado')
+    else alertas.exito('Devuelto a pendiente')
   } catch (e) {
     alertas.error(mensajeError(e, 'Error al cambiar la entrega'))
   } finally {
@@ -73,7 +76,7 @@ async function alternarEntrega(t: TicketDetalleDto) {
   }
 }
 
-function fecha(valor?: string) {
+function fecha(valor?: string | null) {
   if (!valor) return ''
   return new Date(valor).toLocaleString('es-BO', { dateStyle: 'short', timeStyle: 'short' })
 }
@@ -97,8 +100,12 @@ onMounted(cargar)
           <span class="etiqueta">entregados</span>
         </div>
         <div class="dato">
-          <span class="numero" style="color:var(--rojo)">{{ pendientes.length }}</span>
-          <span class="etiqueta">sin entregar</span>
+          <span class="numero" style="color:#dc2626">{{ rechazados.length }}</span>
+          <span class="etiqueta">rechazados</span>
+        </div>
+        <div class="dato">
+          <span class="numero" style="color:var(--texto-suave)">{{ pendientes.length }}</span>
+          <span class="etiqueta">pendientes</span>
         </div>
       </div>
     </div>
@@ -121,10 +128,11 @@ onMounted(cargar)
           <option value="DOCENTE">Docentes</option>
           <option value="EXTERNO">Particulares</option>
         </select>
-        <select v-model="verEstado" style="max-width:200px">
+        <select v-model="verEstado" style="max-width:220px">
           <option value="todos">Todos ({{ tickets.length }})</option>
           <option value="entregados">Entregados ({{ entregados.length }})</option>
-          <option value="pendientes">Sin entregar ({{ pendientes.length }})</option>
+          <option value="rechazados">Rechazados ({{ rechazados.length }})</option>
+          <option value="pendientes">Pendientes ({{ pendientes.length }})</option>
         </select>
       </template>
 
@@ -132,32 +140,47 @@ onMounted(cargar)
         {{ CAT_NOMBRE[valor as CategoriaTicket] ?? valor }}
       </template>
 
-      <template #col-entregado="{ fila }">
-        <span v-if="fila.entregado" class="chip" style="background:#dcfce7;color:#166534">
+      <template #col-estadoEntrega="{ fila }">
+        <span v-if="(fila as any).rechazado" class="chip" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca">
+          No acepto
+        </span>
+        <span v-else-if="(fila as any).entregado" class="chip" style="background:#dcfce7;color:#166534">
           Entregado
         </span>
         <span v-else style="color:var(--texto-suave)">Pendiente</span>
-        <div v-if="fila.fechaEntrega" style="color:var(--texto-suave);font-size:11px;margin-top:2px">
-          {{ fecha(fila.fechaEntrega as string) }}
+        <div v-if="(fila as any).fechaEntrega" style="color:var(--texto-suave);font-size:11px;margin-top:2px">
+          {{ fecha((fila as any).fechaEntrega) }}
+        </div>
+        <div v-if="(fila as any).fechaRechazo" style="color:#991b1b;font-size:11px;margin-top:2px">
+          {{ fecha((fila as any).fechaRechazo) }}
         </div>
       </template>
 
       <template #acciones="{ fila }">
-        <button
-          v-if="!fila.entregado"
-          :disabled="guardando === fila.idTicket"
-          @click="alternarEntrega(fila)"
-        >
-          {{ guardando === fila.idTicket ? 'Guardando…' : 'Marcar entregado' }}
-        </button>
-        <button
-          v-else
-          class="secundario"
-          :disabled="guardando === fila.idTicket"
-          @click="alternarEntrega(fila)"
-        >
-          {{ guardando === fila.idTicket ? 'Guardando…' : 'Deshacer' }}
-        </button>
+        <template v-if="!(fila as any).entregado && !(fila as any).rechazado">
+          <button :disabled="guardando === (fila as any).idTicket" @click="cambiarEstado(fila as any, 'ENTREGADO')">
+            {{ guardando === (fila as any).idTicket ? 'Guardando…' : 'Entregar' }}
+          </button>
+          <button class="secundario" :disabled="guardando === (fila as any).idTicket" style="border-color:#fecaca;color:#991b1b" @click="cambiarEstado(fila as any, 'RECHAZADO')">
+            No acepto
+          </button>
+        </template>
+        <template v-else-if="(fila as any).entregado">
+          <button class="secundario" :disabled="guardando === (fila as any).idTicket" @click="cambiarEstado(fila as any, 'PENDIENTE')">
+            {{ guardando === (fila as any).idTicket ? 'Guardando…' : 'Quitar entrega' }}
+          </button>
+          <button class="secundario" :disabled="guardando === (fila as any).idTicket" style="border-color:#fecaca;color:#991b1b" @click="cambiarEstado(fila as any, 'RECHAZADO')">
+            Rechazar
+          </button>
+        </template>
+        <template v-else>
+          <button :disabled="guardando === (fila as any).idTicket" @click="cambiarEstado(fila as any, 'ENTREGADO')">
+            Entregar
+          </button>
+          <button class="secundario" :disabled="guardando === (fila as any).idTicket" @click="cambiarEstado(fila as any, 'PENDIENTE')">
+            Quitar rechazo
+          </button>
+        </template>
       </template>
     </TablaDatos>
   </div>
@@ -168,7 +191,7 @@ onMounted(cargar)
 .dato {
   display: flex; flex-direction: column;
   background: #f8fafc; border: 1px solid var(--borde);
-  border-radius: 10px; padding: 12px 18px; min-width: 120px;
+  border-radius: 10px; padding: 12px 18px; min-width: 110px;
 }
 .numero { font-size: 24px; font-weight: 700; line-height: 1.1; }
 .etiqueta { color: var(--texto-suave); font-size: 12px; margin-top: 2px; }
